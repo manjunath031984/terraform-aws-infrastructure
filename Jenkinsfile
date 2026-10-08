@@ -11,7 +11,7 @@ pipeline {
         choice(
             name: 'ACTION',
             choices: ['plan', 'apply', 'destroy'],
-            description: 'Select the Terraform action'
+            description: 'Select the Terraform action to perform'
         )
     }
 
@@ -33,7 +33,7 @@ pipeline {
             steps {
                 withCredentials([
                     [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-terraform-credentials']
+                     credentialsId: 'aws-jenkins-credentials']
                 ]) {
                     sh '''
                         set -e
@@ -78,6 +78,11 @@ pipeline {
                         echo "======================================"
 
                         terraform validate
+
+                        echo ""
+                        echo "======================================"
+                        echo "Terraform Setup & Validation Completed"
+                        echo "======================================"
                     '''
                 }
             }
@@ -87,7 +92,7 @@ pipeline {
             steps {
                 withCredentials([
                     [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-terraform-credentials']
+                     credentialsId: 'aws-jenkins-credentials']
                 ]) {
                     sh '''
                         set -e
@@ -97,6 +102,9 @@ pipeline {
                         echo "======================================"
 
                         terraform plan -out=tfplan
+
+                        echo ""
+                        echo "Terraform Plan Completed Successfully"
                     '''
                 }
             }
@@ -117,14 +125,14 @@ pipeline {
 
                         input(
                             message: 'Do you want to APPLY the Terraform infrastructure?',
-                            ok: 'Approve Apply'
+                            ok: 'Proceed'
                         )
 
                     } else {
 
                         input(
                             message: 'WARNING: Do you want to DESTROY the Terraform infrastructure?',
-                            ok: 'Approve Destroy'
+                            ok: 'Proceed'
                         )
                     }
                 }
@@ -141,7 +149,7 @@ pipeline {
             steps {
                 withCredentials([
                     [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-terraform-credentials']
+                     credentialsId: 'aws-jenkins-credentials']
                 ]) {
                     sh '''
                         set -e
@@ -151,6 +159,9 @@ pipeline {
                         echo "======================================"
 
                         terraform apply -auto-approve tfplan
+
+                        echo ""
+                        echo "Terraform Apply Completed Successfully"
                     '''
                 }
             }
@@ -166,7 +177,7 @@ pipeline {
             steps {
                 withCredentials([
                     [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-terraform-credentials']
+                     credentialsId: 'aws-jenkins-credentials']
                 ]) {
                     sh '''
                         set -e
@@ -176,6 +187,9 @@ pipeline {
                         echo "======================================"
 
                         terraform destroy -auto-approve
+
+                        echo ""
+                        echo "Terraform Destroy Completed Successfully"
                     '''
                 }
             }
@@ -191,7 +205,7 @@ pipeline {
             steps {
                 withCredentials([
                     [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-terraform-credentials']
+                     credentialsId: 'aws-jenkins-credentials']
                 ]) {
                     sh '''
                         echo "======================================"
@@ -199,6 +213,9 @@ pipeline {
                         echo "======================================"
 
                         terraform output
+
+                        echo ""
+                        echo "Terraform Outputs Retrieved Successfully"
                     '''
                 }
             }
@@ -217,6 +234,12 @@ pipeline {
             echo "======================================"
             echo "Terraform Pipeline Failed"
             echo "Please check the Jenkins console logs."
+            echo "======================================"
+        }
+
+        aborted {
+            echo "======================================"
+            echo "Terraform Pipeline Aborted"
             echo "======================================"
         }
 
