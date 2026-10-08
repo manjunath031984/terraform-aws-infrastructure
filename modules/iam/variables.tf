@@ -1,5 +1,5 @@
 # =============================================================================
-# Employee Management - Security Groups Module Variables
+# Employee Management - IAM Module Variables
 # =============================================================================
 
 
@@ -8,10 +8,7 @@ variable "project_name" {
   type        = string
 
   validation {
-    condition = (
-      length(trimspace(var.project_name)) > 0
-    )
-
+    condition     = length(trimspace(var.project_name)) > 0
     error_message = "project_name must not be empty."
   }
 }
@@ -39,40 +36,11 @@ variable "environment" {
 }
 
 
-variable "vpc_id" {
-  description = "ID of the VPC where the security groups will be created."
-  type        = string
-
-  validation {
-    condition = (
-      length(trimspace(var.vpc_id)) > 0
-    )
-
-    error_message = "vpc_id must not be empty."
-  }
-}
-
-
-variable "application_port" {
-  description = "Port used by the Employee Management application."
-  type        = number
-  default     = 8080
-
-  validation {
-    condition = (
-      var.application_port >= 1 &&
-      var.application_port <= 65535
-    )
-
-    error_message = "application_port must be between 1 and 65535."
-  }
-}
-
-
 variable "common_tags" {
-  description = "Common tags applied to all taggable security group resources."
+  description = "Common tags applied to all taggable IAM resources."
   type        = map(string)
-  default     = {}
+
+  default = {}
 
   validation {
     condition = alltrue([
