@@ -31,70 +31,102 @@ pipeline {
 
         stage('Terraform Setup & Validation') {
             steps {
-                sh '''
-                    set -e
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                     credentialsId: 'aws-terraform-credentials']
+                ]) {
+                    sh '''
+                        set -e
 
-                    echo "======================================"
-                    echo "Terraform Version"
-                    echo "======================================"
-                    terraform version
+                        echo "======================================"
+                        echo "AWS Identity"
+                        echo "======================================"
 
-                    echo ""
-                    echo "======================================"
-                    echo "AWS CLI Version"
-                    echo "======================================"
-                    aws --version
+                        aws sts get-caller-identity
 
-                    echo ""
-                    echo "======================================"
-                    echo "Terraform Init"
-                    echo "======================================"
-                    terraform init -upgrade
+                        echo ""
+                        echo "======================================"
+                        echo "Terraform Version"
+                        echo "======================================"
 
-                    echo ""
-                    echo "======================================"
-                    echo "Terraform Format Check"
-                    echo "======================================"
-                    terraform fmt -check -recursive
+                        terraform version
 
-                    echo ""
-                    echo "======================================"
-                    echo "Terraform Validate"
-                    echo "======================================"
-                    terraform validate
-                '''
+                        echo ""
+                        echo "======================================"
+                        echo "AWS CLI Version"
+                        echo "======================================"
+
+                        aws --version
+
+                        echo ""
+                        echo "======================================"
+                        echo "Terraform Init"
+                        echo "======================================"
+
+                        terraform init -upgrade
+
+                        echo ""
+                        echo "======================================"
+                        echo "Terraform Format Check"
+                        echo "======================================"
+
+                        terraform fmt -check -recursive
+
+                        echo ""
+                        echo "======================================"
+                        echo "Terraform Validate"
+                        echo "======================================"
+
+                        terraform validate
+                    '''
+                }
             }
         }
 
         stage('Terraform Plan') {
             steps {
-                sh '''
-                    echo "======================================"
-                    echo "Terraform Plan"
-                    echo "======================================"
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                     credentialsId: 'aws-terraform-credentials']
+                ]) {
+                    sh '''
+                        set -e
 
-                    terraform plan -out=tfplan
-                '''
+                        echo "======================================"
+                        echo "Terraform Plan"
+                        echo "======================================"
+
+                        terraform plan -out=tfplan
+                    '''
+                }
             }
         }
 
         stage('Approval') {
             when {
                 expression {
-                    return params.ACTION == 'apply' || params.ACTION == 'destroy'
+                    return params.ACTION == 'apply' ||
+                           params.ACTION == 'destroy'
                 }
             }
 
             steps {
                 script {
-                    def actionMessage = params.ACTION == 'apply'
-                        ? 'Do you want to APPLY the Terraform infrastructure?'
-                        : 'WARNING: Do you want to DESTROY the Terraform infrastructure?'
 
-                    input(
-                        message: actionMessage,
-                        ok: 'Proceed'
-                    )
+                    if (params.ACTION == 'apply') {
+
+                        input(
+                            message: 'Do you want to APPLY the Terraform infrastructure?',
+                            ok: 'Approve Apply'
+                        )
+
+                    } else {
+
+                        input(
+                            message: 'WARNING: Do you want to DESTROY the Terraform infrastructure?',
+                            ok: 'Approve Destroy'
+                        )
+                    }
                 }
             }
         }
@@ -107,13 +139,20 @@ pipeline {
             }
 
             steps {
-                sh '''
-                    echo "======================================"
-                    echo "Terraform Apply"
-                    echo "======================================"
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                     credentialsId: 'aws-terraform-credentials']
+                ]) {
+                    sh '''
+                        set -e
 
-                    terraform apply -auto-approve tfplan
-                '''
+                        echo "======================================"
+                        echo "Terraform Apply"
+                        echo "======================================"
+
+                        terraform apply -auto-approve tfplan
+                    '''
+                }
             }
         }
 
@@ -125,13 +164,20 @@ pipeline {
             }
 
             steps {
-                sh '''
-                    echo "======================================"
-                    echo "Terraform Destroy"
-                    echo "======================================"
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                     credentialsId: 'aws-terraform-credentials']
+                ]) {
+                    sh '''
+                        set -e
 
-                    terraform destroy -auto-approve
-                '''
+                        echo "======================================"
+                        echo "Terraform Destroy"
+                        echo "======================================"
+
+                        terraform destroy -auto-approve
+                    '''
+                }
             }
         }
 
@@ -143,24 +189,35 @@ pipeline {
             }
 
             steps {
-                sh '''
-                    echo "======================================"
-                    echo "Terraform Outputs"
-                    echo "======================================"
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                     credentialsId: 'aws-terraform-credentials']
+                ]) {
+                    sh '''
+                        echo "======================================"
+                        echo "Terraform Outputs"
+                        echo "======================================"
 
-                    terraform output
-                '''
+                        terraform output
+                    '''
+                }
             }
         }
     }
 
     post {
+
         success {
-            echo "Terraform pipeline completed successfully."
+            echo "======================================"
+            echo "Terraform Pipeline Completed Successfully"
+            echo "======================================"
         }
 
         failure {
-            echo "Terraform pipeline failed. Check the Jenkins console logs."
+            echo "======================================"
+            echo "Terraform Pipeline Failed"
+            echo "Please check the Jenkins console logs."
+            echo "======================================"
         }
 
         always {
