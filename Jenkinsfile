@@ -1,77 +1,27 @@
 pipeline {
-
     agent any
-
-    // ============================================================
-    // ENVIRONMENT
-    // ============================================================
-
-    environment {
-        AWS_DEFAULT_REGION    = 'us-east-1'
-        AWS_REGION            = 'us-east-1'
-
-        TF_IN_AUTOMATION      = 'true'
-        TF_INPUT              = 'false'
-
-        TERRAFORM_DIR         = 'Infra/eks'
-
-        GODEBUG               = 'netdns=go+1'
-
-        TF_PLUGIN_CACHE_DIR   = '/var/jenkins_home/.terraform.d/plugin-cache'
-    }
-
-    // ============================================================
-    // PIPELINE OPTIONS
-    // ============================================================
 
     options {
         timestamps()
-
         disableConcurrentBuilds()
-
         ansiColor('xterm')
-
-        skipDefaultCheckout(true)
-
-        // Maximum pipeline execution time
-        timeout(
-            time: 60,
-            unit: 'MINUTES'
-        )
     }
-
-    // ============================================================
-    // PARAMETERS
-    // ============================================================
 
     parameters {
-
         choice(
             name: 'ACTION',
-            choices: [
-                'plan',
-                'apply',
-                'destroy'
-            ],
-            description: 'Select Terraform action'
-        )
-
-        booleanParam(
-            name: 'AUTO_APPROVE',
-            defaultValue: false,
-            description: 'Skip manual approval for apply/destroy'
+            choices: ['plan', 'apply', 'destroy'],
+            description: 'Select the Terraform action'
         )
     }
 
-    // ============================================================
-    // STAGES
-    // ============================================================
+    environment {
+        TF_IN_AUTOMATION = 'true'
+        AWS_DEFAULT_REGION = 'us-east-1'
+        AWS_REGION = 'us-east-1'
+    }
 
     stages {
-
-        // ========================================================
-        // CHECKOUT
-        // ========================================================
 
         stage('Checkout') {
             steps {
@@ -79,223 +29,77 @@ pipeline {
             }
         }
 
-        // ========================================================
-        // ENVIRONMENT CHECK
-        // ========================================================
-
-        stage('Environment Check') {
-
+        stage('Terraform Setup & Validation') {
             steps {
+                sh '''
+                    set -e
 
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-jenkins-credentials'
-                    ]
-                ]) {
+                    echo "======================================"
+                    echo "Terraform Version"
+                    echo "======================================"
+                    terraform version
 
-                    dir("${TERRAFORM_DIR}") {
+                    echo ""
+                    echo "======================================"
+                    echo "AWS CLI Version"
+                    echo "======================================"
+                    aws --version
 
-                        sh '''
-                            set -e
+                    echo ""
+                    echo "======================================"
+                    echo "Terraform Init"
+                    echo "======================================"
+                    terraform init -upgrade
 
-                            echo "======================================"
-                            echo "Environment Information"
-                            echo "======================================"
+                    echo ""
+                    echo "======================================"
+                    echo "Terraform Format Check"
+                    echo "======================================"
+                    terraform fmt -check -recursive
 
-                            echo ""
-                            echo "AWS Region:"
-                            echo "$AWS_DEFAULT_REGION"
-
-                            echo ""
-                            echo "Terraform Version:"
-                            terraform version
-
-                            echo ""
-                            echo "AWS CLI Version:"
-                            aws --version
-
-                            echo ""
-                            echo "AWS Identity:"
-                            aws sts get-caller-identity
-
-                            echo ""
-                            echo "AWS authentication successful."
-                        '''
-                    }
-                }
+                    echo ""
+                    echo "======================================"
+                    echo "Terraform Validate"
+                    echo "======================================"
+                    terraform validate
+                '''
             }
         }
-
-        // ========================================================
-        // TERRAFORM PREPARE
-        // Format + Init + Validate
-        // ========================================================
-
-        stage('Terraform Prepare') {
-
-            steps {
-
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-jenkins-credentials'
-                    ]
-                ]) {
-
-                    dir("${TERRAFORM_DIR}") {
-
-                        sh '''
-                            set -e
-
-                            echo "======================================"
-                            echo "Terraform Format Check"
-                            echo "======================================"
-
-                            terraform fmt -check -recursive
-
-                            echo ""
-                            echo "======================================"
-                            echo "Terraform Init"
-                            echo "======================================"
-
-                            terraform init -input=false -upgrade
-
-                            echo ""
-                            echo "======================================"
-                            echo "Terraform Validate"
-                            echo "======================================"
-
-                            terraform validate
-
-                            echo ""
-                            echo "======================================"
-                            echo "Terraform Preparation Completed"
-                            echo "======================================"
-                        '''
-                    }
-                }
-            }
-        }
-
-        // ========================================================
-        // TERRAFORM PLAN
-        // ========================================================
 
         stage('Terraform Plan') {
-
             steps {
+                sh '''
+                    echo "======================================"
+                    echo "Terraform Plan"
+                    echo "======================================"
 
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-jenkins-credentials'
-                    ]
-                ]) {
-
-                    dir("${TERRAFORM_DIR}") {
-
-                        sh '''
-                            set -e
-
-                            echo "======================================"
-                            echo "Terraform Plan"
-                            echo "======================================"
-
-                            rm -f tfplan
-
-                            terraform plan \
-                                -input=false \
-                                -out=tfplan
-
-                            echo ""
-                            echo "Terraform plan created successfully."
-                        '''
-                    }
-                }
-            }
-
-            post {
-                always {
-                    archiveArtifacts(
-                        artifacts: 'Infra/eks/tfplan',
-                        allowEmptyArchive: true
-                    )
-                }
+                    terraform plan -out=tfplan
+                '''
             }
         }
-
-        // ========================================================
-        // APPROVAL
-        //
-        // Runs only when:
-        //   ACTION = apply
-        //   ACTION = destroy
-        //   AUTO_APPROVE = false
-        //
-        // Skipped when:
-        //   ACTION = plan
-        //   AUTO_APPROVE = true
-        // ========================================================
 
         stage('Approval') {
-
             when {
                 expression {
-                    return (
-                        (params.ACTION == 'apply' ||
-                         params.ACTION == 'destroy') &&
-                        !params.AUTO_APPROVE
-                    )
+                    return params.ACTION == 'apply' || params.ACTION == 'destroy'
                 }
             }
 
             steps {
+                script {
+                    def actionMessage = params.ACTION == 'apply'
+                        ? 'Do you want to APPLY the Terraform infrastructure?'
+                        : 'WARNING: Do you want to DESTROY the Terraform infrastructure?'
 
-                timeout(
-                    time: 30,
-                    unit: 'MINUTES'
-                ) {
-
-                    script {
-
-                        def approvalMessage
-
-                        if (params.ACTION == 'destroy') {
-
-                            approvalMessage =
-                                'Approve Terraform DESTROY for AWS EKS infrastructure?'
-
-                        } else {
-
-                            approvalMessage =
-                                'Approve Terraform APPLY for AWS EKS infrastructure?'
-                        }
-
-                        echo "======================================"
-                        echo "MANUAL APPROVAL REQUIRED"
-                        echo "======================================"
-                        echo "Terraform Action: ${params.ACTION}"
-                        echo "Approval Required: YES"
-                        echo "Waiting for user approval..."
-                        echo "======================================"
-
-                        input(
-                            id: 'TerraformApproval',
-                            message: approvalMessage,
-                            ok: 'Proceed'
-                        )
-                    }
+                    input(
+                        message: actionMessage,
+                        ok: 'Proceed'
+                    )
                 }
             }
         }
 
-        // ========================================================
-        // TERRAFORM APPLY
-        // ========================================================
-
         stage('Terraform Apply') {
-
             when {
                 expression {
                     return params.ACTION == 'apply'
@@ -303,42 +107,17 @@ pipeline {
             }
 
             steps {
+                sh '''
+                    echo "======================================"
+                    echo "Terraform Apply"
+                    echo "======================================"
 
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-jenkins-credentials'
-                    ]
-                ]) {
-
-                    dir("${TERRAFORM_DIR}") {
-
-                        sh '''
-                            set -e
-
-                            echo "======================================"
-                            echo "Terraform Apply"
-                            echo "======================================"
-
-                            terraform apply \
-                                -input=false \
-                                -auto-approve \
-                                tfplan
-
-                            echo ""
-                            echo "Terraform Apply completed successfully."
-                        '''
-                    }
-                }
+                    terraform apply -auto-approve tfplan
+                '''
             }
         }
 
-        // ========================================================
-        // TERRAFORM DESTROY
-        // ========================================================
-
         stage('Terraform Destroy') {
-
             when {
                 expression {
                     return params.ACTION == 'destroy'
@@ -346,41 +125,17 @@ pipeline {
             }
 
             steps {
+                sh '''
+                    echo "======================================"
+                    echo "Terraform Destroy"
+                    echo "======================================"
 
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-jenkins-credentials'
-                    ]
-                ]) {
-
-                    dir("${TERRAFORM_DIR}") {
-
-                        sh '''
-                            set -e
-
-                            echo "======================================"
-                            echo "Terraform Destroy"
-                            echo "======================================"
-
-                            terraform destroy \
-                                -input=false \
-                                -auto-approve
-
-                            echo ""
-                            echo "Terraform Destroy completed successfully."
-                        '''
-                    }
-                }
+                    terraform destroy -auto-approve
+                '''
             }
         }
 
-        // ========================================================
-        // TERRAFORM OUTPUTS
-        // ========================================================
-
         stage('Terraform Outputs') {
-
             when {
                 expression {
                     return params.ACTION == 'apply'
@@ -388,87 +143,30 @@ pipeline {
             }
 
             steps {
+                sh '''
+                    echo "======================================"
+                    echo "Terraform Outputs"
+                    echo "======================================"
 
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-jenkins-credentials'
-                    ]
-                ]) {
-
-                    dir("${TERRAFORM_DIR}") {
-
-                        sh '''
-                            set +x
-
-                            echo "======================================"
-                            echo "EKS Cluster Outputs"
-                            echo "======================================"
-
-                            echo ""
-                            echo "Cluster Name:"
-                            terraform output -raw cluster_name
-
-                            echo ""
-                            echo "Cluster ARN:"
-                            terraform output -raw cluster_arn
-
-                            echo ""
-                            echo "EKS infrastructure deployment completed."
-                        '''
-                    }
-                }
+                    terraform output
+                '''
             }
         }
     }
 
-    // ============================================================
-    // POST ACTIONS
-    // ============================================================
-
     post {
-
         success {
-
-            echo "======================================"
-            echo "Jenkins Pipeline SUCCESS"
-            echo "======================================"
-
-            echo "Terraform Action: ${params.ACTION}"
-            echo "AWS Region: ${AWS_DEFAULT_REGION}"
-            echo "Terraform Directory: ${TERRAFORM_DIR}"
+            echo "Terraform pipeline completed successfully."
         }
 
         failure {
-
-            echo "======================================"
-            echo "Jenkins Pipeline FAILED"
-            echo "======================================"
-
-            echo "Terraform Action: ${params.ACTION}"
-            echo "Please check the Jenkins console output."
-        }
-
-        aborted {
-
-            echo "======================================"
-            echo "Jenkins Pipeline ABORTED"
-            echo "======================================"
-
-            echo "Terraform Action: ${params.ACTION}"
-            echo "Pipeline was stopped by the user or timeout."
+            echo "Terraform pipeline failed. Check the Jenkins console logs."
         }
 
         always {
-
-            dir("${TERRAFORM_DIR}") {
-
-                sh '''
-                    rm -f tfplan
-                '''
-            }
-
-            cleanWs()
+            sh '''
+                rm -f tfplan 2>/dev/null || true
+            '''
         }
     }
 }
