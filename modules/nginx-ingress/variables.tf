@@ -70,20 +70,17 @@ variable "namespace" {
 # HELM RELEASE
 # =============================================================================
 
+
 variable "release_name" {
   description = "Helm release name for the NGINX Ingress Controller."
   type        = string
   default     = "nginx-ingress"
 
   validation {
-    condition = (
-      length(trimspace(var.release_name)) > 0
-    )
-
+    condition     = length(trimspace(var.release_name)) > 0
     error_message = "release_name must not be empty."
   }
 }
-
 
 variable "helm_repository" {
   description = "Helm repository containing the NGINX Ingress Controller chart."
@@ -91,13 +88,11 @@ variable "helm_repository" {
   default     = "https://kubernetes.github.io/ingress-nginx"
 }
 
-
 variable "helm_chart" {
   description = "Helm chart name for the NGINX Ingress Controller."
   type        = string
   default     = "ingress-nginx"
 }
-
 
 variable "chart_version" {
   description = "Version of the NGINX Ingress Controller Helm chart."
@@ -105,20 +100,17 @@ variable "chart_version" {
   default     = "4.13.0"
 }
 
-
 variable "helm_timeout" {
   description = "Maximum time Terraform waits for the NGINX Ingress Helm release."
   type        = number
   default     = 600
 
   validation {
-    condition = (
-      var.helm_timeout >= 60
-    )
-
+    condition     = var.helm_timeout >= 60
     error_message = "helm_timeout must be at least 60 seconds."
   }
 }
+
 
 
 # =============================================================================
