@@ -19,23 +19,44 @@ pipeline {
     environment {
         TF_IN_AUTOMATION = 'true'
         TF_INPUT = 'false'
+
         AWS_DEFAULT_REGION = 'us-east-1'
         AWS_REGION = 'us-east-1'
 
-        // Persistent cache on the Jenkins agent.
         TF_PLUGIN_CACHE_DIR = '/var/jenkins_home/.terraform.d/plugin-cache'
-
-        // Retry configuration for provider downloads.
         TF_INIT_MAX_ATTEMPTS = '4'
     }
 
     stages {
 
+        // ================================================================
+        // CHECKOUT
+        // ================================================================
+
         stage('Checkout') {
             steps {
                 checkout scm
+
+                sh '''
+                    set -eu
+
+                    echo "======================================"
+                    echo "Git Branch and Commit"
+                    echo "======================================"
+
+                    git branch --show-current
+                    git log -1 --oneline
+
+                    echo ""
+                    echo "Selected Terraform action: $ACTION"
+                    echo "AWS Region: $AWS_REGION"
+                '''
             }
         }
+
+        // ================================================================
+        // PREPARE PROVIDER CACHE
+        // ================================================================
 
         stage('Prepare Terraform Provider Cache') {
             steps {
@@ -59,6 +80,10 @@ pipeline {
             }
         }
 
+        // ================================================================
+        // TERRAFORM SETUP AND VALIDATION
+        // ================================================================
+
         stage('Terraform Setup & Validation') {
             steps {
                 withCredentials([
@@ -73,18 +98,21 @@ pipeline {
                         echo "======================================"
                         echo "AWS Identity"
                         echo "======================================"
+
                         aws sts get-caller-identity
 
                         echo ""
                         echo "======================================"
                         echo "Terraform Version"
                         echo "======================================"
+
                         terraform version
 
                         echo ""
                         echo "======================================"
                         echo "AWS CLI Version"
                         echo "======================================"
+
                         aws --version
 
                         echo ""
@@ -95,9 +123,9 @@ pipeline {
                         attempt=1
                         max_attempts="$TF_INIT_MAX_ATTEMPTS"
 
-                        until terraform init -input=false -no-color; do
+                        while ! terraform init -input=false -no-color; do
                             if [ "$attempt" -ge "$max_attempts" ]; then
-                                echo "ERROR: Terraform initialization failed after $attempt attempts."
+                                echo "ERROR: Terraform init failed after $attempt attempts."
                                 exit 1
                             fi
 
@@ -114,12 +142,14 @@ pipeline {
                         echo "======================================"
                         echo "Terraform Format Check"
                         echo "======================================"
+
                         terraform fmt -check -recursive
 
                         echo ""
                         echo "======================================"
                         echo "Terraform Validate"
                         echo "======================================"
+
                         terraform validate -no-color
 
                         echo ""
@@ -129,7 +159,17 @@ pipeline {
             }
         }
 
+        // ================================================================
+        // TERRAFORM PLAN
+        // ================================================================
+
         stage('Terraform Plan') {
+            when {
+                expression {
+                    params.ACTION == 'plan' || params.ACTION == 'apply'
+                }
+            }
+
             steps {
                 withCredentials([
                     [
@@ -144,6 +184,8 @@ pipeline {
                         echo "Terraform Plan"
                         echo "======================================"
 
+                        terraform workspace show
+
                         terraform plan \
                             -input=false \
                             -no-color \
@@ -151,7 +193,10 @@ pipeline {
                             -out=tfplan
 
                         echo ""
+                        echo "======================================"
                         echo "Readable Terraform Plan"
+                        echo "======================================"
+
                         terraform show -no-color tfplan
 
                         echo ""
@@ -161,11 +206,14 @@ pipeline {
             }
         }
 
+        // ================================================================
+        // APPROVAL
+        // ================================================================
+
         stage('Approval') {
             when {
                 expression {
-                    params.ACTION == 'apply' ||
-                    params.ACTION == 'destroy'
+                    params.ACTION == 'apply' || params.ACTION == 'destroy'
                 }
             }
 
@@ -178,13 +226,17 @@ pipeline {
                         )
                     } else {
                         input(
-                            message: 'WARNING: This will DESTROY managed infrastructure. Do you want to continue?',
+                            message: 'WARNING: This will DESTROY Terraform-managed infrastructure. Confirm that the correct Terraform state is selected.',
                             ok: 'Proceed'
                         )
                     }
                 }
             }
         }
+
+        // ================================================================
+        // TERRAFORM APPLY
+        // ================================================================
 
         stage('Terraform Apply') {
             when {
@@ -225,6 +277,10 @@ pipeline {
             }
         }
 
+        // ================================================================
+        // TERRAFORM DESTROY
+        // ================================================================
+
         stage('Terraform Destroy') {
             when {
                 expression {
@@ -246,17 +302,36 @@ pipeline {
                         echo "Terraform Destroy"
                         echo "======================================"
 
+                        echo "AWS account:"
+                        aws sts get-caller-identity
+
+                        echo ""
+                        echo "Terraform workspace:"
+                        terraform workspace show
+
+                        echo ""
+                        echo "Resources currently tracked by Terraform:"
+                        terraform state list
+
+                        echo ""
+                        echo "WARNING: Verify the Terraform state before continuing."
+
                         terraform destroy \
                             -input=false \
                             -no-color \
+                            -auto-approve \
                             -var-file="environments/dev/terraform.tfvars"
 
                         echo ""
-                        echo "Terraform Destroy Completed"
+                        echo "Terraform Destroy Command Completed"
                     '''
                 }
             }
         }
+
+        // ================================================================
+        // TERRAFORM OUTPUTS
+        // ================================================================
 
         stage('Terraform Outputs') {
             when {
