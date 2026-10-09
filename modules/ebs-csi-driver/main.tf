@@ -1,8 +1,8 @@
+
 # =============================================================================
 # Employee Management - EBS CSI Driver Module
 # =============================================================================
 # Creates:
-#
 # 1. IAM role for the Amazon EBS CSI Driver
 # 2. Amazon EBS CSI Driver EKS add-on
 #
@@ -60,8 +60,7 @@ data "aws_iam_policy_document" "ebs_csi_assume_role" {
 # =============================================================================
 
 resource "aws_iam_role" "ebs_csi" {
-  name = "${var.project_name}-ebs-csi-role"
-
+  name        = "${var.project_name}-ebs-csi-role"
   description = "IAM role used by the Amazon EBS CSI Driver for Employee Management EKS."
 
   assume_role_policy = data.aws_iam_policy_document.ebs_csi_assume_role.json
@@ -106,6 +105,26 @@ resource "aws_eks_addon" "ebs_csi" {
 
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
+
+  # Allow the EBS CSI controller to schedule on either workload node group.
+  configuration_values = jsonencode({
+    controller = {
+      tolerations = [
+        {
+          key      = "workload"
+          operator = "Equal"
+          value    = "postgres"
+          effect   = "NoSchedule"
+        },
+        {
+          key      = "workload"
+          operator = "Equal"
+          value    = "application"
+          effect   = "NoSchedule"
+        }
+      ]
+    }
+  })
 
   tags = merge(
     var.common_tags,

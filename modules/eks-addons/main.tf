@@ -1,16 +1,13 @@
+
 # =============================================================================
 # Employee Management - EKS Add-ons Module
 # =============================================================================
 # Manages the core Amazon EKS add-ons:
-#
 # 1. VPC CNI
 # 2. CoreDNS
 # 3. kube-proxy
 #
-# EBS CSI Driver and NGINX Ingress Controller are intentionally managed
-# by their respective modules.
-#
-# All taggable AWS resources use meaningful and consistent tags.
+# EBS CSI Driver and NGINX Ingress Controller are managed by their own modules.
 # =============================================================================
 
 
@@ -54,6 +51,24 @@ resource "aws_eks_addon" "coredns" {
 
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
+
+  # Allow CoreDNS pods to schedule on either workload node group.
+  configuration_values = jsonencode({
+    tolerations = [
+      {
+        key      = "workload"
+        operator = "Equal"
+        value    = "postgres"
+        effect   = "NoSchedule"
+      },
+      {
+        key      = "workload"
+        operator = "Equal"
+        value    = "application"
+        effect   = "NoSchedule"
+      }
+    ]
+  })
 
   tags = merge(
     var.common_tags,
