@@ -1,3 +1,4 @@
+
 # =============================================================================
 # Employee Management - VPC Module
 # =============================================================================
@@ -57,12 +58,12 @@ resource "aws_subnet" "public" {
   tags = merge(
     var.common_tags,
     {
-      Name                     = "${var.project_name}-public-${each.value.name}"
-      Module                   = "VPC"
-      Component                = "Public Subnet"
-      Purpose                  = "Public subnet for AWS Load Balancers and internet-facing resources"
-      Resource                 = "Subnet"
-      Type                     = "Public"
+      Name                      = each.value.name
+      Module                    = "VPC"
+      Component                 = "Public Subnet"
+      Purpose                   = "Public subnet for AWS Load Balancers and internet-facing resources"
+      Resource                  = "Subnet"
+      Type                      = "Public"
       "kubernetes.io/role/elb" = "1"
     }
   )
@@ -83,7 +84,7 @@ resource "aws_subnet" "private" {
   tags = merge(
     var.common_tags,
     {
-      Name                              = "${var.project_name}-private-${each.value.name}"
+      Name                              = each.value.name
       Module                            = "VPC"
       Component                         = "Private Subnet"
       Purpose                           = "Private subnet for EKS worker nodes and application workloads"
@@ -198,7 +199,7 @@ resource "aws_route_table" "private" {
   tags = merge(
     var.common_tags,
     {
-      Name      = "${var.project_name}-private-${each.value.name}-rt"
+      Name      = "${each.value.name}-rt"
       Module    = "VPC"
       Component = "Private Route Table"
       Purpose   = "Routes private subnet outbound traffic through NAT Gateway"
