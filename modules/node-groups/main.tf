@@ -246,3 +246,33 @@ resource "aws_autoscaling_group_tag" "application_instance_name" {
     propagate_at_launch = true
   }
 }
+
+resource "aws_autoscaling_group_tag" "postgres_instance_name" {
+  for_each = {
+    for index, name in data.aws_autoscaling_groups.postgres.names :
+    tostring(index) => name
+  }
+
+  autoscaling_group_name = each.value
+
+  tag {
+    key                 = "Name"
+    value               = "${var.project_name}-postgres-worker"
+    propagate_at_launch = true
+  }
+}
+
+resource "aws_autoscaling_group_tag" "application_instance_name" {
+  for_each = {
+    for index, name in data.aws_autoscaling_groups.application.names :
+    tostring(index) => name
+  }
+
+  autoscaling_group_name = each.value
+
+  tag {
+    key                 = "Name"
+    value               = "${var.project_name}-app-worker"
+    propagate_at_launch = true
+  }
+}
