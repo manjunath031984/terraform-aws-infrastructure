@@ -59,14 +59,14 @@ module "vpc" {
       cidr              = "10.0.11.0/24"
       availability_zone = "us-east-1a"
       name              = "${var.project_name}-private-az1"
-      nat_gateway_key    = "public_az1"
+      nat_gateway_key   = "public_az1"
     }
 
     private_az2 = {
       cidr              = "10.0.12.0/24"
       availability_zone = "us-east-1b"
       name              = "${var.project_name}-private-az2"
-      nat_gateway_key    = "public_az2"
+      nat_gateway_key   = "public_az2"
     }
   }
 
@@ -226,29 +226,29 @@ module "node_groups" {
   # Instance types
   # ---------------------------------------------------------------------------
 
-  postgres_instance_types   = var.postgres_instance_types
+  postgres_instance_types    = var.postgres_instance_types
   application_instance_types = var.application_instance_types
 
   # ---------------------------------------------------------------------------
   # Capacity type
   # ---------------------------------------------------------------------------
 
-  postgres_capacity_type   = var.postgres_capacity_type
+  postgres_capacity_type    = var.postgres_capacity_type
   application_capacity_type = var.application_capacity_type
 
   # ---------------------------------------------------------------------------
   # Disk size
   # ---------------------------------------------------------------------------
 
-  postgres_disk_size     = var.postgres_disk_size
-  application_disk_size  = var.application_disk_size
+  postgres_disk_size    = var.postgres_disk_size
+  application_disk_size = var.application_disk_size
 
   # ---------------------------------------------------------------------------
   # AMI type
   # ---------------------------------------------------------------------------
 
-  postgres_ami_type     = var.postgres_ami_type
-  application_ami_type  = var.application_ami_type
+  postgres_ami_type    = var.postgres_ami_type
+  application_ami_type = var.application_ami_type
 
   common_tags = local.common_tags
 
@@ -397,7 +397,7 @@ module "nginx_ingress" {
   ingress_class_name    = var.nginx_ingress_class_name
   ingress_class_default = var.nginx_ingress_class_default
 
-  load_balancer_scheme  = var.nginx_load_balancer_scheme
+  load_balancer_scheme    = var.nginx_load_balancer_scheme
   external_traffic_policy = var.nginx_external_traffic_policy
 
   replica_count = var.nginx_replica_count
