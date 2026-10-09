@@ -84,7 +84,7 @@ eks_enabled_cluster_log_types = [
 # KMS
 # =============================================================================
 
-kms_deletion_window_in_days = 5
+kms_deletion_window_in_days = 7
 
 
 # =============================================================================
@@ -104,7 +104,7 @@ postgres_instance_types = [
 postgres_capacity_type = "ON_DEMAND"
 
 # Must match modules/node-groups/variables.tf
-postgres_disk_size = 10
+postgres_disk_size = 20
 
 postgres_ami_type = "AL2023_x86_64_STANDARD"
 

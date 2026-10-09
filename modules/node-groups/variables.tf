@@ -82,15 +82,6 @@ variable "node_role_arn" {
   }
 }
 
-
-# =============================================================================
-# NODE ROLE DEPENDENCY
-# =============================================================================
-# This is used only to ensure that the IAM role policy attachments are
-# completed before EKS managed node groups are created.
-# =============================================================================
-
-
 # =============================================================================
 # PRIVATE SUBNETS
 # =============================================================================
@@ -200,16 +191,14 @@ variable "postgres_capacity_type" {
 variable "postgres_disk_size" {
   description = "Root EBS volume size in GiB for PostgreSQL worker nodes."
   type        = number
-  default     = 30
+  default     = 20
 
   validation {
-    condition = (
-      var.postgres_disk_size >= 20
-    )
-
+    condition     = var.postgres_disk_size >= 20
     error_message = "postgres_disk_size must be at least 20 GiB."
   }
 }
+
 
 
 variable "postgres_ami_type" {
