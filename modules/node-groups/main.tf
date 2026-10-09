@@ -8,7 +8,6 @@
 #
 # Design:
 # - Two managed node groups
-# - One node per workload
 # - Nodes deployed into private subnets
 # - Workload-specific labels and taints
 # - Existing IAM role is reused
@@ -28,57 +27,39 @@ resource "aws_eks_node_group" "postgres" {
   node_role_arn   = var.node_role_arn
   subnet_ids      = var.private_subnet_ids
 
-  # ---------------------------------------------------------------------------
-  # SCALING CONFIGURATION
-  # ---------------------------------------------------------------------------
-
+  # Scaling configuration
   scaling_config {
     desired_size = var.postgres_desired_size
     min_size     = var.postgres_min_size
     max_size     = var.postgres_max_size
   }
 
-  # ---------------------------------------------------------------------------
-  # INSTANCE CONFIGURATION
-  # ---------------------------------------------------------------------------
-
+  # Instance configuration
   instance_types = var.postgres_instance_types
   capacity_type  = var.postgres_capacity_type
   disk_size      = var.postgres_disk_size
   ami_type       = var.postgres_ami_type
 
-  # ---------------------------------------------------------------------------
-  # UPDATE CONFIGURATION
-  # ---------------------------------------------------------------------------
-
+  # Update configuration
   update_config {
     max_unavailable = 1
   }
 
-  # ---------------------------------------------------------------------------
-  # WORKLOAD LABELS
-  # ---------------------------------------------------------------------------
-
+  # Workload labels
   labels = {
     workload    = "postgres"
     component   = "database"
     application = "Employee-Management"
   }
 
-  # ---------------------------------------------------------------------------
-  # WORKLOAD TAINT
-  # ---------------------------------------------------------------------------
-
+  # Workload taint
   taint {
     key    = "workload"
     value  = "postgres"
     effect = "NO_SCHEDULE"
   }
 
-  # ---------------------------------------------------------------------------
-  # RESOURCE TAGS
-  # ---------------------------------------------------------------------------
-
+  # Resource tags
   tags = merge(
     var.common_tags,
     {
@@ -105,57 +86,39 @@ resource "aws_eks_node_group" "application" {
   node_role_arn   = var.node_role_arn
   subnet_ids      = var.private_subnet_ids
 
-  # ---------------------------------------------------------------------------
-  # SCALING CONFIGURATION
-  # ---------------------------------------------------------------------------
-
+  # Scaling configuration
   scaling_config {
     desired_size = var.application_desired_size
     min_size     = var.application_min_size
     max_size     = var.application_max_size
   }
 
-  # ---------------------------------------------------------------------------
-  # INSTANCE CONFIGURATION
-  # ---------------------------------------------------------------------------
-
+  # Instance configuration
   instance_types = var.application_instance_types
   capacity_type  = var.application_capacity_type
   disk_size      = var.application_disk_size
   ami_type       = var.application_ami_type
 
-  # ---------------------------------------------------------------------------
-  # UPDATE CONFIGURATION
-  # ---------------------------------------------------------------------------
-
+  # Update configuration
   update_config {
     max_unavailable = 1
   }
 
-  # ---------------------------------------------------------------------------
-  # WORKLOAD LABELS
-  # ---------------------------------------------------------------------------
-
+  # Workload labels
   labels = {
     workload    = "application"
     component   = "employee-management"
     application = "Employee-Management"
   }
 
-  # ---------------------------------------------------------------------------
-  # WORKLOAD TAINT
-  # ---------------------------------------------------------------------------
-
+  # Workload taint
   taint {
     key    = "workload"
     value  = "application"
     effect = "NO_SCHEDULE"
   }
 
-  # ---------------------------------------------------------------------------
-  # RESOURCE TAGS
-  # ---------------------------------------------------------------------------
-
+  # Resource tags
   tags = merge(
     var.common_tags,
     {
@@ -169,110 +132,4 @@ resource "aws_eks_node_group" "application" {
       NodeGroup = "${var.project_name}-app-ng"
     }
   )
-}
-
-
-# =============================================================================
-# DISCOVER POSTGRESQL AUTO SCALING GROUPS
-# =============================================================================
-
-data "aws_autoscaling_groups" "postgres" {
-  filter {
-    name   = "tag:eks:cluster-name"
-    values = [var.cluster_name]
-  }
-
-  filter {
-    name   = "tag:eks:nodegroup-name"
-    values = ["${var.project_name}-postgres-ng"]
-  }
-
-  depends_on = [
-    aws_eks_node_group.postgres
-  ]
-}
-
-
-# =============================================================================
-# DISCOVER APPLICATION AUTO SCALING GROUPS
-# =============================================================================
-
-data "aws_autoscaling_groups" "application" {
-  filter {
-    name   = "tag:eks:cluster-name"
-    values = [var.cluster_name]
-  }
-
-  filter {
-    name   = "tag:eks:nodegroup-name"
-    values = ["${var.project_name}-app-ng"]
-  }
-
-  depends_on = [
-    aws_eks_node_group.application
-  ]
-}
-
-
-# =============================================================================
-# EC2 INSTANCE NAME TAGS - POSTGRESQL WORKERS
-# =============================================================================
-
-resource "aws_autoscaling_group_tag" "postgres_instance_name" {
-  for_each = toset(data.aws_autoscaling_groups.postgres.names)
-
-  autoscaling_group_name = each.value
-
-  tag {
-    key                 = "Name"
-    value               = "${var.project_name}-postgres-worker"
-    propagate_at_launch = true
-  }
-}
-
-
-# =============================================================================
-# EC2 INSTANCE NAME TAGS - APPLICATION WORKERS
-# =============================================================================
-
-resource "aws_autoscaling_group_tag" "application_instance_name" {
-  for_each = toset(data.aws_autoscaling_groups.application.names)
-
-  autoscaling_group_name = each.value
-
-  tag {
-    key                 = "Name"
-    value               = "${var.project_name}-app-worker"
-    propagate_at_launch = true
-  }
-}
-
-resource "aws_autoscaling_group_tag" "postgres_instance_name" {
-  for_each = {
-    for index, name in data.aws_autoscaling_groups.postgres.names :
-    tostring(index) => name
-  }
-
-  autoscaling_group_name = each.value
-
-  tag {
-    key                 = "Name"
-    value               = "${var.project_name}-postgres-worker"
-    propagate_at_launch = true
-  }
-}
-
-resource "aws_autoscaling_group_tag" "application_instance_name" {
-  for_each = {
-    for index, name in data.aws_autoscaling_groups.application.names :
-    tostring(index) => name
-  }
-
-  autoscaling_group_name = each.value
-
-  tag {
-    key                 = "Name"
-    value               = "${var.project_name}-app-worker"
-    propagate_at_launch = true
-  }
 }
