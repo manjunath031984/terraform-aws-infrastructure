@@ -1,3 +1,4 @@
+```groovy
 pipeline {
     agent any
 
@@ -32,8 +33,10 @@ pipeline {
         stage('Terraform Setup & Validation') {
             steps {
                 withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-jenkins-credentials']
+                    [
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'aws-jenkins-credentials'
+                    ]
                 ]) {
                     sh '''
                         set -e
@@ -41,48 +44,40 @@ pipeline {
                         echo "======================================"
                         echo "AWS Identity"
                         echo "======================================"
-
                         aws sts get-caller-identity
 
                         echo ""
                         echo "======================================"
                         echo "Terraform Version"
                         echo "======================================"
-
                         terraform version
 
                         echo ""
                         echo "======================================"
                         echo "AWS CLI Version"
                         echo "======================================"
-
                         aws --version
 
                         echo ""
                         echo "======================================"
                         echo "Terraform Init"
                         echo "======================================"
-
                         terraform init -upgrade
 
                         echo ""
                         echo "======================================"
                         echo "Terraform Format Check"
                         echo "======================================"
-
                         terraform fmt -check -recursive
 
                         echo ""
                         echo "======================================"
                         echo "Terraform Validate"
                         echo "======================================"
-
                         terraform validate
 
                         echo ""
-                        echo "======================================"
                         echo "Terraform Setup & Validation Completed"
-                        echo "======================================"
                     '''
                 }
             }
@@ -91,8 +86,10 @@ pipeline {
         stage('Terraform Plan') {
             steps {
                 withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-jenkins-credentials']
+                    [
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'aws-jenkins-credentials'
+                    ]
                 ]) {
                     sh '''
                         set -e
@@ -101,7 +98,9 @@ pipeline {
                         echo "Terraform Plan"
                         echo "======================================"
 
-                        terraform plan -out=tfplan
+                        terraform plan \
+                            -var-file="environments/dev/terraform.tfvars" \
+                            -out=tfplan
 
                         echo ""
                         echo "Terraform Plan Completed Successfully"
@@ -113,23 +112,19 @@ pipeline {
         stage('Approval') {
             when {
                 expression {
-                    return params.ACTION == 'apply' ||
-                           params.ACTION == 'destroy'
+                    params.ACTION == 'apply' ||
+                    params.ACTION == 'destroy'
                 }
             }
 
             steps {
                 script {
-
                     if (params.ACTION == 'apply') {
-
                         input(
                             message: 'Do you want to APPLY the Terraform infrastructure?',
                             ok: 'Proceed'
                         )
-
                     } else {
-
                         input(
                             message: 'WARNING: Do you want to DESTROY the Terraform infrastructure?',
                             ok: 'Proceed'
@@ -142,14 +137,16 @@ pipeline {
         stage('Terraform Apply') {
             when {
                 expression {
-                    return params.ACTION == 'apply'
+                    params.ACTION == 'apply'
                 }
             }
 
             steps {
                 withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-jenkins-credentials']
+                    [
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'aws-jenkins-credentials'
+                    ]
                 ]) {
                     sh '''
                         set -e
@@ -170,14 +167,16 @@ pipeline {
         stage('Terraform Destroy') {
             when {
                 expression {
-                    return params.ACTION == 'destroy'
+                    params.ACTION == 'destroy'
                 }
             }
 
             steps {
                 withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-jenkins-credentials']
+                    [
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'aws-jenkins-credentials'
+                    ]
                 ]) {
                     sh '''
                         set -e
@@ -186,7 +185,9 @@ pipeline {
                         echo "Terraform Destroy"
                         echo "======================================"
 
-                        terraform destroy -auto-approve
+                        terraform destroy \
+                            -var-file="environments/dev/terraform.tfvars" \
+                            -auto-approve
 
                         echo ""
                         echo "Terraform Destroy Completed Successfully"
@@ -198,16 +199,20 @@ pipeline {
         stage('Terraform Outputs') {
             when {
                 expression {
-                    return params.ACTION == 'apply'
+                    params.ACTION == 'apply'
                 }
             }
 
             steps {
                 withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                     credentialsId: 'aws-jenkins-credentials']
+                    [
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'aws-jenkins-credentials'
+                    ]
                 ]) {
                     sh '''
+                        set -e
+
                         echo "======================================"
                         echo "Terraform Outputs"
                         echo "======================================"
@@ -223,7 +228,6 @@ pipeline {
     }
 
     post {
-
         success {
             echo "======================================"
             echo "Terraform Pipeline Completed Successfully"
@@ -250,3 +254,4 @@ pipeline {
         }
     }
 }
+```
