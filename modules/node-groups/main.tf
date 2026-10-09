@@ -1,8 +1,8 @@
+
 # =============================================================================
 # Employee Management - EKS Node Groups Module
 # =============================================================================
 # Creates EKS managed node groups for:
-#
 # 1. PostgreSQL workload
 # 2. Employee Management application workload
 #
@@ -23,13 +23,10 @@
 # =============================================================================
 
 resource "aws_eks_node_group" "postgres" {
-  cluster_name = var.cluster_name
-
+  cluster_name    = var.cluster_name
   node_group_name = "${var.project_name}-postgres-ng"
-
-  node_role_arn = var.node_role_arn
-
-  subnet_ids = var.private_subnet_ids
+  node_role_arn   = var.node_role_arn
+  subnet_ids      = var.private_subnet_ids
 
   # ---------------------------------------------------------------------------
   # SCALING CONFIGURATION
@@ -46,12 +43,9 @@ resource "aws_eks_node_group" "postgres" {
   # ---------------------------------------------------------------------------
 
   instance_types = var.postgres_instance_types
-
-  capacity_type = var.postgres_capacity_type
-
-  disk_size = var.postgres_disk_size
-
-  ami_type = var.postgres_ami_type
+  capacity_type  = var.postgres_capacity_type
+  disk_size      = var.postgres_disk_size
+  ami_type       = var.postgres_ami_type
 
   # ---------------------------------------------------------------------------
   # UPDATE CONFIGURATION
@@ -73,8 +67,6 @@ resource "aws_eks_node_group" "postgres" {
 
   # ---------------------------------------------------------------------------
   # WORKLOAD TAINT
-  # ---------------------------------------------------------------------------
-  # Only PostgreSQL pods should be scheduled on this node group.
   # ---------------------------------------------------------------------------
 
   taint {
@@ -108,13 +100,10 @@ resource "aws_eks_node_group" "postgres" {
 # =============================================================================
 
 resource "aws_eks_node_group" "application" {
-  cluster_name = var.cluster_name
-
+  cluster_name    = var.cluster_name
   node_group_name = "${var.project_name}-app-ng"
-
-  node_role_arn = var.node_role_arn
-
-  subnet_ids = var.private_subnet_ids
+  node_role_arn   = var.node_role_arn
+  subnet_ids      = var.private_subnet_ids
 
   # ---------------------------------------------------------------------------
   # SCALING CONFIGURATION
@@ -131,12 +120,9 @@ resource "aws_eks_node_group" "application" {
   # ---------------------------------------------------------------------------
 
   instance_types = var.application_instance_types
-
-  capacity_type = var.application_capacity_type
-
-  disk_size = var.application_disk_size
-
-  ami_type = var.application_ami_type
+  capacity_type  = var.application_capacity_type
+  disk_size      = var.application_disk_size
+  ami_type       = var.application_ami_type
 
   # ---------------------------------------------------------------------------
   # UPDATE CONFIGURATION
@@ -158,8 +144,6 @@ resource "aws_eks_node_group" "application" {
 
   # ---------------------------------------------------------------------------
   # WORKLOAD TAINT
-  # ---------------------------------------------------------------------------
-  # Only application workloads should be scheduled on this node group.
   # ---------------------------------------------------------------------------
 
   taint {
@@ -185,4 +169,80 @@ resource "aws_eks_node_group" "application" {
       NodeGroup = "${var.project_name}-app-ng"
     }
   )
+}
+
+
+# =============================================================================
+# DISCOVER POSTGRESQL AUTO SCALING GROUPS
+# =============================================================================
+
+data "aws_autoscaling_groups" "postgres" {
+  filter {
+    name   = "tag:eks:cluster-name"
+    values = [var.cluster_name]
+  }
+
+  filter {
+    name   = "tag:eks:nodegroup-name"
+    values = ["${var.project_name}-postgres-ng"]
+  }
+
+  depends_on = [
+    aws_eks_node_group.postgres
+  ]
+}
+
+
+# =============================================================================
+# DISCOVER APPLICATION AUTO SCALING GROUPS
+# =============================================================================
+
+data "aws_autoscaling_groups" "application" {
+  filter {
+    name   = "tag:eks:cluster-name"
+    values = [var.cluster_name]
+  }
+
+  filter {
+    name   = "tag:eks:nodegroup-name"
+    values = ["${var.project_name}-app-ng"]
+  }
+
+  depends_on = [
+    aws_eks_node_group.application
+  ]
+}
+
+
+# =============================================================================
+# EC2 INSTANCE NAME TAGS - POSTGRESQL WORKERS
+# =============================================================================
+
+resource "aws_autoscaling_group_tag" "postgres_instance_name" {
+  for_each = toset(data.aws_autoscaling_groups.postgres.names)
+
+  autoscaling_group_name = each.value
+
+  tag {
+    key                 = "Name"
+    value               = "${var.project_name}-postgres-worker"
+    propagate_at_launch = true
+  }
+}
+
+
+# =============================================================================
+# EC2 INSTANCE NAME TAGS - APPLICATION WORKERS
+# =============================================================================
+
+resource "aws_autoscaling_group_tag" "application_instance_name" {
+  for_each = toset(data.aws_autoscaling_groups.application.names)
+
+  autoscaling_group_name = each.value
+
+  tag {
+    key                 = "Name"
+    value               = "${var.project_name}-app-worker"
+    propagate_at_launch = true
+  }
 }

@@ -58,12 +58,12 @@ resource "aws_subnet" "public" {
   tags = merge(
     var.common_tags,
     {
-      Name                      = each.value.name
-      Module                    = "VPC"
-      Component                 = "Public Subnet"
-      Purpose                   = "Public subnet for AWS Load Balancers and internet-facing resources"
-      Resource                  = "Subnet"
-      Type                      = "Public"
+      Name                     = each.value.name
+      Module                   = "VPC"
+      Component                = "Public Subnet"
+      Purpose                  = "Public subnet for AWS Load Balancers and internet-facing resources"
+      Resource                 = "Subnet"
+      Type                     = "Public"
       "kubernetes.io/role/elb" = "1"
     }
   )
