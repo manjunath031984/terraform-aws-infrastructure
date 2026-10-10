@@ -1,12 +1,10 @@
 pipeline {
     agent any
-
     options {
         timestamps()
         disableConcurrentBuilds()
         ansiColor('xterm')
     }
-
     parameters {
         choice(
             name: 'ACTION',
@@ -19,7 +17,6 @@ pipeline {
             description: 'Enable only for an intentional fresh deployment when Terraform state is empty and you have verified the backend, workspace, and AWS resources.'
         )
     }
-
     environment {
         TF_IN_AUTOMATION      = 'true'
         TF_INPUT              = 'false'
@@ -32,7 +29,6 @@ pipeline {
         EKS_CLUSTER_NAME      = 'Employee-Management-eks'
         NGINX_NAMESPACE       = 'nginx-ingress'
     }
-
     stages {
         stage('Checkout') {
             steps {
@@ -50,7 +46,6 @@ pipeline {
                 '''
             }
         }
-
         stage('Prepare Terraform Provider Cache') {
             steps {
                 sh '''
@@ -66,7 +61,6 @@ pipeline {
                 '''
             }
         }
-
         stage('Build and Validate Helm Chart') {
             steps {
                 sh '''
@@ -93,7 +87,6 @@ pipeline {
                 '''
             }
         }
-
         stage('Terraform Setup & Validation') {
             steps {
                 withCredentials([[
@@ -106,7 +99,21 @@ pipeline {
                         echo "AWS Identity"
                         echo "======================================"
                         aws sts get-caller-identity
-
+                        echo
+                        echo "======================================"
+                        echo "EKS Authentication and Connectivity Preflight"
+                        echo "======================================"
+                        echo "Checking AWS CLI token generation..."
+                        aws eks get-token \
+                            --cluster-name "$EKS_CLUSTER_NAME" \
+                            --region "$AWS_REGION" >/dev/null
+                        echo "Configuring kubectl context..."
+                        aws eks update-kubeconfig \
+                            --name "$EKS_CLUSTER_NAME" \
+                            --region "$AWS_REGION" \
+                            --alias "$EKS_CLUSTER_NAME-ci"
+                        echo "Checking Kubernetes API access..."
+                        kubectl get namespaces --request-timeout=20s
                         echo
                         echo "======================================"
                         echo "Tool Versions"
@@ -114,7 +121,6 @@ pipeline {
                         terraform version
                         aws --version
                         helm version
-
                         echo
                         echo "======================================"
                         echo "Terraform Init with Retry"
@@ -126,25 +132,22 @@ pipeline {
                                 echo "ERROR: Terraform init failed after $attempt attempts."
                                 exit 1
                             fi
-                            delay=$((5 * (2 ** (attempt - 1))))
+                            delay=$((5 * (1 << (attempt - 1))) )
                             echo "Terraform init failed on attempt $attempt."
                             echo "Retrying in $delay seconds..."
                             sleep "$delay"
                             attempt=$((attempt + 1))
                         done
-
                         echo
                         echo "======================================"
                         echo "Terraform Format Check"
                         echo "======================================"
                         terraform fmt -check -recursive
-
                         echo
                         echo "======================================"
                         echo "Terraform Validate"
                         echo "======================================"
                         terraform validate -no-color
-
                         echo
                         echo "======================================"
                         echo "Terraform Workspace and State Summary"
@@ -155,7 +158,6 @@ pipeline {
                 }
             }
         }
-
         stage('Terraform State Safety Check') {
             when {
                 expression {
@@ -175,15 +177,12 @@ pipeline {
                             aws sts get-caller-identity
                             echo "Terraform workspace:"
                             terraform workspace show
-
                             state_file="$(mktemp)"
                             trap 'rm -f "$state_file"' EXIT
-
                             if ! terraform state list > "$state_file"; then
                                 echo "ERROR: Unable to read Terraform state. Refusing to continue."
                                 exit 1
                             fi
-
                             if [ ! -s "$state_file" ]; then
                                 echo "WARNING: Terraform state contains no tracked resources."
                                 if [ "$ACTION" = "destroy" ]; then
@@ -191,7 +190,6 @@ pipeline {
                                     echo "Verify the backend/workspace and recover or import state if infrastructure already exists."
                                     exit 1
                                 fi
-
                                 if [ "$ACTION" = "apply" ]; then
                                     if [ "$ALLOW_EMPTY_STATE_APPLY" != "true" ]; then
                                         echo "ERROR: Apply is blocked because state is empty and ALLOW_EMPTY_STATE_APPLY is false."
@@ -210,7 +208,6 @@ pipeline {
                 }
             }
         }
-
         stage('Terraform Plan') {
             when {
                 expression {
@@ -247,7 +244,6 @@ pipeline {
                 }
             }
         }
-
         stage('Approval') {
             when {
                 expression {
@@ -270,7 +266,6 @@ pipeline {
                 }
             }
         }
-
         stage('Terraform Apply') {
             when {
                 expression { params.ACTION == 'apply' }
@@ -299,7 +294,6 @@ pipeline {
                 }
             }
         }
-
         stage('Validate EKS Infrastructure') {
             when {
                 expression { params.ACTION == 'apply' }
@@ -316,28 +310,23 @@ pipeline {
                         echo "======================================"
                         command -v aws >/dev/null 2>&1 || { echo "ERROR: AWS CLI is missing."; exit 1; }
                         command -v kubectl >/dev/null 2>&1 || { echo "ERROR: kubectl is missing from the Jenkins agent/container."; exit 1; }
-
                         aws eks wait cluster-active \
                             --name "$EKS_CLUSTER_NAME" \
                             --region "$AWS_REGION"
-
                         aws eks describe-cluster \
                             --name "$EKS_CLUSTER_NAME" \
                             --region "$AWS_REGION" \
                             --query 'cluster.{Name:name,Status:status,Version:version}' \
                             --output table
-
                         NODEGROUPS=$(aws eks list-nodegroups \
                             --cluster-name "$EKS_CLUSTER_NAME" \
                             --region "$AWS_REGION" \
                             --query 'nodegroups[]' \
                             --output text)
-
                         if [ -z "$NODEGROUPS" ] || [ "$NODEGROUPS" = "None" ]; then
                             echo "ERROR: No managed node groups found."
                             exit 1
                         fi
-
                         for NODEGROUP in $NODEGROUPS; do
                             STATUS=$(aws eks describe-nodegroup \
                                 --cluster-name "$EKS_CLUSTER_NAME" \
@@ -351,16 +340,13 @@ pipeline {
                                 exit 1
                             fi
                         done
-
                         echo "Configuring kubectl..."
                         aws eks update-kubeconfig \
                             --name "$EKS_CLUSTER_NAME" \
                             --region "$AWS_REGION"
-
                         echo "Checking Kubernetes node readiness..."
                         kubectl get nodes -o wide
                         kubectl wait --for=condition=Ready nodes --all --timeout=10m
-
                         echo "Checking EKS add-on status..."
                         ADDONS=$(aws eks list-addons \
                             --cluster-name "$EKS_CLUSTER_NAME" \
@@ -380,25 +366,21 @@ pipeline {
                                 exit 1
                             fi
                         done
-
                         echo "Checking storage drivers and classes..."
                         kubectl get csidriver
                         kubectl get storageclass
                         kubectl get pods -n kube-system -o wide
-
                         echo "Checking NGINX Ingress namespace and pods..."
                         if kubectl get namespace "$NGINX_NAMESPACE" >/dev/null 2>&1; then
                             kubectl get pods -n "$NGINX_NAMESPACE" -o wide
                         else
                             echo "WARNING: Namespace $NGINX_NAMESPACE was not found; verify the configured namespace variable."
                         fi
-
                         echo "EKS infrastructure validation completed."
                     '''
                 }
             }
         }
-
         stage('Terraform Destroy') {
             when {
                 expression { params.ACTION == 'destroy' }
@@ -429,7 +411,6 @@ pipeline {
                 }
             }
         }
-
         stage('Terraform Outputs') {
             when {
                 expression { params.ACTION == 'apply' }
@@ -451,7 +432,6 @@ pipeline {
             }
         }
     }
-
     post {
         success {
             echo '======================================'
