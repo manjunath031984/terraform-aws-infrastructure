@@ -59,7 +59,7 @@ application_port = 8080
 # EKS
 # =============================================================================
 
-kubernetes_version = "1.33"
+kubernetes_version = "1.37"
 
 eks_service_ipv4_cidr = "172.20.0.0/16"
 
