@@ -130,7 +130,7 @@ variable "application_port" {
 variable "kubernetes_version" {
   description = "Kubernetes version for the EKS cluster"
   type        = string
-  default     = "1.37"
+  default     = "1.36"
 }
 
 variable "eks_service_ipv4_cidr" {
