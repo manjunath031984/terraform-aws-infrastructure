@@ -59,17 +59,19 @@ application_port = 8080
 # EKS
 # =============================================================================
 
-kubernetes_version = "1.36"
+kubernetes_version = "1.33"
 
 eks_service_ipv4_cidr = "172.20.0.0/16"
 
-# Keep the Kubernetes API private.
+# Keep private endpoint access enabled for workloads inside the VPC.
 eks_endpoint_private_access = true
 
-# Public API endpoint disabled.
-eks_endpoint_public_access = false
+# Enable public endpoint access only from the approved public IPv4 address.
+eks_endpoint_public_access = true
 
-eks_public_access_cidrs = []
+eks_public_access_cidrs = [
+  "103.203.37.67/32"
+]
 
 eks_enabled_cluster_log_types = [
   "api",

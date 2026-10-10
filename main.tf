@@ -1,6 +1,4 @@
-
-# =============================================================================
-# Employee Management - Root Terraform Configuration
+$Employee Management - Root Terraform Configuration
 # =============================================================================
 # Wires all infrastructure modules together.
 #
@@ -163,6 +161,20 @@ module "eks" {
     module.iam,
     module.kms
   ]
+}
+
+# =============================================================================
+# EKS CLUSTER SECURITY GROUP NAME TAG
+# =============================================================================
+# Amazon EKS manages the cluster security group. This resource changes only
+# its Name tag; it does not change the security group's actual name/description.
+# =============================================================================
+
+resource "aws_ec2_tag" "eks_cluster_security_group_name" {
+  resource_id = module.eks.cluster_security_group_id
+
+  key   = "Name"
+  value = "Employee-Management-eks-cluster-sg"
 }
 
 
