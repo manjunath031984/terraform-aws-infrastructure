@@ -61,7 +61,7 @@ variable "kubernetes_version" {
       var.kubernetes_version
     ))
 
-    error_message = "kubernetes_version must use the format MAJOR.MINOR, for example 1.33."
+    error_message = "kubernetes_version must use the format MAJOR.MINOR, for example 1.36."
   }
 }
 
