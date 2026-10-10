@@ -1,0 +1,33 @@
+
+NGINX Ingress Controller has been installed successfully!
+
+Release Information
+-------------------
+Release Name:  {{ .Release.Name }}
+Namespace:     {{ .Release.Namespace }}
+Chart Version: {{ .Chart.Version }}
+
+Ingress Configuration
+---------------------
+Ingress Class: nginx
+
+Check the controller pods:
+  kubectl get pods -n {{ .Release.Namespace }} -o wide
+
+Check the controller service and AWS Load Balancer:
+  kubectl get svc -n {{ .Release.Namespace }}
+
+Check Ingress resources across namespaces:
+  kubectl get ingress -A
+
+Check controller logs:
+  kubectl logs -n {{ .Release.Namespace }} \
+    -l app.kubernetes.io/component=controller \
+    --tail=100
+
+Check Helm release status:
+  helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+Note:
+The AWS Network Load Balancer hostname will appear in the
+EXTERNAL-IP column after AWS provisions the load balancer.

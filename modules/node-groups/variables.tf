@@ -1,3 +1,4 @@
+
 # =============================================================================
 # Employee Management - EKS Node Groups Module Variables
 # =============================================================================
@@ -12,10 +13,7 @@ variable "project_name" {
   type        = string
 
   validation {
-    condition = (
-      length(trimspace(var.project_name)) > 0
-    )
-
+    condition     = length(trimspace(var.project_name)) > 0
     error_message = "project_name must not be empty."
   }
 }
@@ -31,15 +29,8 @@ variable "environment" {
 
   validation {
     condition = contains(
-      [
-        "dev",
-        "development",
-        "staging",
-        "stage",
-        "prod",
-        "production"
-      ],
-      lower(var.environment)
+      ["dev", "development", "staging", "stage", "prod", "production"],
+      lower(trimspace(var.environment))
     )
 
     error_message = "environment must be dev, development, staging, stage, prod, or production."
@@ -56,10 +47,7 @@ variable "cluster_name" {
   type        = string
 
   validation {
-    condition = (
-      length(trimspace(var.cluster_name)) > 0
-    )
-
+    condition     = length(trimspace(var.cluster_name)) > 0
     error_message = "cluster_name must not be empty."
   }
 }
@@ -74,13 +62,11 @@ variable "node_role_arn" {
   type        = string
 
   validation {
-    condition = (
-      length(trimspace(var.node_role_arn)) > 0
-    )
-
+    condition     = length(trimspace(var.node_role_arn)) > 0
     error_message = "node_role_arn must not be empty."
   }
 }
+
 
 # =============================================================================
 # PRIVATE SUBNETS
@@ -102,6 +88,22 @@ variable "private_subnet_ids" {
 
 
 # =============================================================================
+# EC2 SSH KEY PAIR
+# =============================================================================
+
+variable "ec2_key_name" {
+  description = "Existing EC2 key pair name configured on EKS worker nodes."
+  type        = string
+  default     = "jenkins-ci-cd-keypair"
+
+  validation {
+    condition     = length(trimspace(var.ec2_key_name)) > 0
+    error_message = "ec2_key_name must not be empty."
+  }
+}
+
+
+# =============================================================================
 # POSTGRESQL NODE GROUP - SCALING
 # =============================================================================
 
@@ -111,14 +113,10 @@ variable "postgres_desired_size" {
   default     = 1
 
   validation {
-    condition = (
-      var.postgres_desired_size >= 1
-    )
-
+    condition     = var.postgres_desired_size >= 1
     error_message = "postgres_desired_size must be at least 1."
   }
 }
-
 
 variable "postgres_min_size" {
   description = "Minimum number of PostgreSQL worker nodes."
@@ -126,14 +124,10 @@ variable "postgres_min_size" {
   default     = 1
 
   validation {
-    condition = (
-      var.postgres_min_size >= 1
-    )
-
+    condition     = var.postgres_min_size >= 1
     error_message = "postgres_min_size must be at least 1."
   }
 }
-
 
 variable "postgres_max_size" {
   description = "Maximum number of PostgreSQL worker nodes."
@@ -141,17 +135,14 @@ variable "postgres_max_size" {
   default     = 1
 
   validation {
-    condition = (
-      var.postgres_max_size >= var.postgres_min_size
-    )
-
+    condition     = var.postgres_max_size >= var.postgres_min_size
     error_message = "postgres_max_size must be greater than or equal to postgres_min_size."
   }
 }
 
 
 # =============================================================================
-# POSTGRESQL NODE GROUP - INSTANCE
+# POSTGRESQL NODE GROUP - INSTANCE CONFIGURATION
 # =============================================================================
 
 variable "postgres_instance_types" {
@@ -160,14 +151,10 @@ variable "postgres_instance_types" {
   default     = ["t3.medium"]
 
   validation {
-    condition = (
-      length(var.postgres_instance_types) > 0
-    )
-
+    condition     = length(var.postgres_instance_types) > 0
     error_message = "At least one PostgreSQL instance type must be specified."
   }
 }
-
 
 variable "postgres_capacity_type" {
   description = "Capacity type for the PostgreSQL node group."
@@ -175,18 +162,10 @@ variable "postgres_capacity_type" {
   default     = "ON_DEMAND"
 
   validation {
-    condition = contains(
-      [
-        "ON_DEMAND",
-        "SPOT"
-      ],
-      var.postgres_capacity_type
-    )
-
+    condition     = contains(["ON_DEMAND", "SPOT"], var.postgres_capacity_type)
     error_message = "postgres_capacity_type must be ON_DEMAND or SPOT."
   }
 }
-
 
 variable "postgres_disk_size" {
   description = "Root EBS volume size in GiB for PostgreSQL worker nodes."
@@ -199,8 +178,6 @@ variable "postgres_disk_size" {
   }
 }
 
-
-
 variable "postgres_ami_type" {
   description = "AMI type used by the PostgreSQL EKS managed node group."
   type        = string
@@ -208,11 +185,7 @@ variable "postgres_ami_type" {
 
   validation {
     condition = contains(
-      [
-        "AL2023_x86_64_STANDARD",
-        "AL2023_ARM_64_STANDARD",
-        "AL2_x86_64"
-      ],
+      ["AL2023_x86_64_STANDARD", "AL2023_ARM_64_STANDARD", "AL2_x86_64"],
       var.postgres_ami_type
     )
 
@@ -231,14 +204,10 @@ variable "application_desired_size" {
   default     = 1
 
   validation {
-    condition = (
-      var.application_desired_size >= 1
-    )
-
+    condition     = var.application_desired_size >= 1
     error_message = "application_desired_size must be at least 1."
   }
 }
-
 
 variable "application_min_size" {
   description = "Minimum number of Employee Management application worker nodes."
@@ -246,14 +215,10 @@ variable "application_min_size" {
   default     = 1
 
   validation {
-    condition = (
-      var.application_min_size >= 1
-    )
-
+    condition     = var.application_min_size >= 1
     error_message = "application_min_size must be at least 1."
   }
 }
-
 
 variable "application_max_size" {
   description = "Maximum number of Employee Management application worker nodes."
@@ -261,17 +226,14 @@ variable "application_max_size" {
   default     = 1
 
   validation {
-    condition = (
-      var.application_max_size >= var.application_min_size
-    )
-
+    condition     = var.application_max_size >= var.application_min_size
     error_message = "application_max_size must be greater than or equal to application_min_size."
   }
 }
 
 
 # =============================================================================
-# APPLICATION NODE GROUP - INSTANCE
+# APPLICATION NODE GROUP - INSTANCE CONFIGURATION
 # =============================================================================
 
 variable "application_instance_types" {
@@ -280,14 +242,10 @@ variable "application_instance_types" {
   default     = ["t3.medium"]
 
   validation {
-    condition = (
-      length(var.application_instance_types) > 0
-    )
-
+    condition     = length(var.application_instance_types) > 0
     error_message = "At least one application instance type must be specified."
   }
 }
-
 
 variable "application_capacity_type" {
   description = "Capacity type for the Employee Management application node group."
@@ -295,46 +253,30 @@ variable "application_capacity_type" {
   default     = "ON_DEMAND"
 
   validation {
-    condition = contains(
-      [
-        "ON_DEMAND",
-        "SPOT"
-      ],
-      var.application_capacity_type
-    )
-
+    condition     = contains(["ON_DEMAND", "SPOT"], var.application_capacity_type)
     error_message = "application_capacity_type must be ON_DEMAND or SPOT."
   }
 }
 
-
 variable "application_disk_size" {
-  description = "Root EBS volume size in GiB for Employee Management application worker nodes."
+  description = "Root EBS volume size in GiB for application worker nodes."
   type        = number
   default     = 30
 
   validation {
-    condition = (
-      var.application_disk_size >= 20
-    )
-
+    condition     = var.application_disk_size >= 20
     error_message = "application_disk_size must be at least 20 GiB."
   }
 }
 
-
 variable "application_ami_type" {
-  description = "AMI type used by the Employee Management application EKS managed node group."
+  description = "AMI type used by the Employee Management application node group."
   type        = string
   default     = "AL2023_x86_64_STANDARD"
 
   validation {
     condition = contains(
-      [
-        "AL2023_x86_64_STANDARD",
-        "AL2023_ARM_64_STANDARD",
-        "AL2_x86_64"
-      ],
+      ["AL2023_x86_64_STANDARD", "AL2023_ARM_64_STANDARD", "AL2_x86_64"],
       var.application_ami_type
     )
 
@@ -342,12 +284,13 @@ variable "application_ami_type" {
   }
 }
 
+
 # =============================================================================
 # COMMON TAGS
 # =============================================================================
 
 variable "common_tags" {
-  description = "Common tags applied to all EKS managed node groups."
+  description = "Common tags applied to node groups, launch templates, instances, and volumes."
   type        = map(string)
   default     = {}
 

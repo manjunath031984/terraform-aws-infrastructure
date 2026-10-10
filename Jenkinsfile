@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -17,60 +16,43 @@ pipeline {
     }
 
     environment {
-        TF_IN_AUTOMATION = 'true'
-        TF_INPUT = 'false'
-
-        AWS_DEFAULT_REGION = 'us-east-1'
-        AWS_REGION = 'us-east-1'
-
-        TF_PLUGIN_CACHE_DIR = '/var/jenkins_home/.terraform.d/plugin-cache'
+        TF_IN_AUTOMATION     = 'true'
+        TF_INPUT             = 'false'
+        AWS_DEFAULT_REGION   = 'us-east-1'
+        AWS_REGION           = 'us-east-1'
+        TF_PLUGIN_CACHE_DIR  = '/var/jenkins_home/.terraform.d/plugin-cache'
         TF_INIT_MAX_ATTEMPTS = '4'
+        TF_VAR_FILE          = 'environments/dev/terraform.tfvars'
+        HELM_CHART_DIR       = 'charts/nginx-ingress'
     }
 
     stages {
-
-        // ================================================================
-        // CHECKOUT
-        // ================================================================
-
         stage('Checkout') {
             steps {
                 checkout scm
-
                 sh '''
                     set -eu
-
                     echo "======================================"
                     echo "Git Branch and Commit"
                     echo "======================================"
-
                     git branch --show-current
                     git log -1 --oneline
-
-                    echo ""
+                    echo
                     echo "Selected Terraform action: $ACTION"
                     echo "AWS Region: $AWS_REGION"
                 '''
             }
         }
 
-        // ================================================================
-        // PREPARE PROVIDER CACHE
-        // ================================================================
-
         stage('Prepare Terraform Provider Cache') {
             steps {
                 sh '''
                     set -eu
-
-                    echo "======================================"
-                    echo "Preparing Terraform Provider Cache"
-                    echo "======================================"
-
+                    echo "Preparing Terraform provider cache"
                     mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
                     if [ ! -w "$TF_PLUGIN_CACHE_DIR" ]; then
-                        echo "ERROR: Terraform provider cache is not writable."
+                        echo "ERROR: Terraform provider cache is not writable: $TF_PLUGIN_CACHE_DIR"
                         exit 1
                     fi
 
@@ -80,42 +62,60 @@ pipeline {
             }
         }
 
-        // ================================================================
-        // TERRAFORM SETUP AND VALIDATION
-        // ================================================================
+        stage('Build and Validate Helm Chart') {
+            steps {
+                sh '''
+                    set -eu
+                    echo "======================================"
+                    echo "Build and Validate NGINX Helm Chart"
+                    echo "======================================"
+
+                    if ! command -v helm >/dev/null 2>&1; then
+                        echo "ERROR: Helm CLI is not installed or not available on PATH."
+                        echo "Install Helm in the Jenkins agent/container before running this pipeline."
+                        exit 1
+                    fi
+
+                    test -f "$HELM_CHART_DIR/Chart.yaml" || {
+                        echo "ERROR: Missing $HELM_CHART_DIR/Chart.yaml"
+                        exit 1
+                    }
+
+                    test -f "$HELM_CHART_DIR/values.yaml" || {
+                        echo "ERROR: Missing $HELM_CHART_DIR/values.yaml"
+                        exit 1
+                    }
+
+                    helm version
+                    helm dependency build "$HELM_CHART_DIR"
+                    helm lint "$HELM_CHART_DIR"
+                '''
+            }
+        }
 
         stage('Terraform Setup & Validation') {
             steps {
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-jenkins-credentials'
-                    ]
-                ]) {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-jenkins-credentials'
+                ]]) {
                     sh '''
                         set -eu
 
                         echo "======================================"
                         echo "AWS Identity"
                         echo "======================================"
-
                         aws sts get-caller-identity
 
-                        echo ""
+                        echo
                         echo "======================================"
-                        echo "Terraform Version"
+                        echo "Tool Versions"
                         echo "======================================"
-
                         terraform version
-
-                        echo ""
-                        echo "======================================"
-                        echo "AWS CLI Version"
-                        echo "======================================"
-
                         aws --version
+                        helm version
 
-                        echo ""
+                        echo
                         echo "======================================"
                         echo "Terraform Init with Retry"
                         echo "======================================"
@@ -130,38 +130,67 @@ pipeline {
                             fi
 
                             delay=$((5 * (2 ** (attempt - 1))))
-
                             echo "Terraform init failed on attempt $attempt."
                             echo "Retrying in $delay seconds..."
-
                             sleep "$delay"
                             attempt=$((attempt + 1))
                         done
 
-                        echo ""
+                        echo
                         echo "======================================"
                         echo "Terraform Format Check"
                         echo "======================================"
-
                         terraform fmt -check -recursive
 
-                        echo ""
+                        echo
                         echo "======================================"
                         echo "Terraform Validate"
                         echo "======================================"
-
                         terraform validate -no-color
 
-                        echo ""
-                        echo "Terraform Setup & Validation Completed"
+                        echo
+                        echo "======================================"
+                        echo "Terraform Workspace and State Summary"
+                        echo "======================================"
+                        terraform workspace show
+                        terraform state list || true
                     '''
                 }
             }
         }
 
-        // ================================================================
-        // TERRAFORM PLAN
-        // ================================================================
+        stage('Terraform State Safety Check') {
+            when {
+                expression {
+                    params.ACTION == 'apply' || params.ACTION == 'destroy'
+                }
+            }
+            steps {
+                sh '''
+                    set -eu
+                    echo "Checking Terraform state before a mutating action..."
+
+                    state_file="$(mktemp)"
+                    trap 'rm -f "$state_file"' EXIT
+
+                    if ! terraform state list > "$state_file"; then
+                        echo "ERROR: Unable to read Terraform state."
+                        exit 1
+                    fi
+
+                    if [ ! -s "$state_file" ]; then
+                        echo "ERROR: Terraform state contains no tracked resources."
+                        echo "For safety, apply/destroy is blocked because existing AWS infrastructure may be unmanaged by this state."
+                        echo "Verify the backend configuration and workspace, restore the correct state backup, or import existing resources before retrying."
+                        exit 1
+                    fi
+
+                    echo "Tracked Terraform resources:"
+                    cat "$state_file"
+                    echo "State safety check passed."
+                '''
+            }
+        }
 
         stage('Terraform Plan') {
             when {
@@ -169,14 +198,11 @@ pipeline {
                     params.ACTION == 'plan' || params.ACTION == 'apply'
                 }
             }
-
             steps {
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-jenkins-credentials'
-                    ]
-                ]) {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-jenkins-credentials'
+                ]]) {
                     sh '''
                         set -eu
 
@@ -184,31 +210,30 @@ pipeline {
                         echo "Terraform Plan"
                         echo "======================================"
 
+                        test -f "$TF_VAR_FILE" || {
+                            echo "ERROR: Variable file not found: $TF_VAR_FILE"
+                            exit 1
+                        }
+
                         terraform workspace show
 
                         terraform plan \
                             -input=false \
                             -no-color \
-                            -var-file="environments/dev/terraform.tfvars" \
+                            -var-file="$TF_VAR_FILE" \
                             -out=tfplan
 
-                        echo ""
+                        echo
                         echo "======================================"
                         echo "Readable Terraform Plan"
                         echo "======================================"
-
                         terraform show -no-color tfplan
 
-                        echo ""
-                        echo "Terraform Plan Completed Successfully"
+                        echo "Terraform plan completed successfully."
                     '''
                 }
             }
         }
-
-        // ================================================================
-        // APPROVAL
-        // ================================================================
 
         stage('Approval') {
             when {
@@ -216,17 +241,16 @@ pipeline {
                     params.ACTION == 'apply' || params.ACTION == 'destroy'
                 }
             }
-
             steps {
                 script {
                     if (params.ACTION == 'apply') {
                         input(
-                            message: 'Review the Terraform plan. Do you want to APPLY the infrastructure changes?',
+                            message: 'Review the Terraform plan above. Do you want to APPLY these infrastructure changes?',
                             ok: 'Proceed'
                         )
                     } else {
                         input(
-                            message: 'WARNING: This will DESTROY Terraform-managed infrastructure. Confirm that the correct Terraform state is selected.',
+                            message: 'WARNING: This will DESTROY Terraform-managed infrastructure. Confirm the workspace, backend, and state are correct.',
                             ok: 'Proceed'
                         )
                     }
@@ -234,24 +258,17 @@ pipeline {
             }
         }
 
-        // ================================================================
-        // TERRAFORM APPLY
-        // ================================================================
-
         stage('Terraform Apply') {
             when {
                 expression {
                     params.ACTION == 'apply'
                 }
             }
-
             steps {
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-jenkins-credentials'
-                    ]
-                ]) {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-jenkins-credentials'
+                ]]) {
                     sh '''
                         set -eu
 
@@ -270,16 +287,11 @@ pipeline {
                             -auto-approve \
                             tfplan
 
-                        echo ""
-                        echo "Terraform Apply Completed Successfully"
+                        echo "Terraform apply completed successfully."
                     '''
                 }
             }
         }
-
-        // ================================================================
-        // TERRAFORM DESTROY
-        // ================================================================
 
         stage('Terraform Destroy') {
             when {
@@ -287,14 +299,11 @@ pipeline {
                     params.ACTION == 'destroy'
                 }
             }
-
             steps {
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-jenkins-credentials'
-                    ]
-                ]) {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-jenkins-credentials'
+                ]]) {
                     sh '''
                         set -eu
 
@@ -305,33 +314,23 @@ pipeline {
                         echo "AWS account:"
                         aws sts get-caller-identity
 
-                        echo ""
                         echo "Terraform workspace:"
                         terraform workspace show
 
-                        echo ""
-                        echo "Resources currently tracked by Terraform:"
+                        echo "Resources tracked by Terraform:"
                         terraform state list
-
-                        echo ""
-                        echo "WARNING: Verify the Terraform state before continuing."
 
                         terraform destroy \
                             -input=false \
                             -no-color \
                             -auto-approve \
-                            -var-file="environments/dev/terraform.tfvars"
+                            -var-file="$TF_VAR_FILE"
 
-                        echo ""
-                        echo "Terraform Destroy Command Completed"
+                        echo "Terraform destroy command completed."
                     '''
                 }
             }
         }
-
-        // ================================================================
-        // TERRAFORM OUTPUTS
-        // ================================================================
 
         stage('Terraform Outputs') {
             when {
@@ -339,14 +338,11 @@ pipeline {
                     params.ACTION == 'apply'
                 }
             }
-
             steps {
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-jenkins-credentials'
-                    ]
-                ]) {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-jenkins-credentials'
+                ]]) {
                     sh '''
                         set -eu
 
@@ -355,9 +351,7 @@ pipeline {
                         echo "======================================"
 
                         terraform output -no-color
-
-                        echo ""
-                        echo "Terraform Outputs Retrieved Successfully"
+                        echo "Terraform outputs retrieved successfully."
                     '''
                 }
             }
@@ -385,9 +379,7 @@ pipeline {
         }
 
         always {
-            sh '''
-                rm -f tfplan 2>/dev/null || true
-            '''
+            sh 'rm -f tfplan 2>/dev/null || true'
         }
     }
 }

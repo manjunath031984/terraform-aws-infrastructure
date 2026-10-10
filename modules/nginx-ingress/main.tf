@@ -2,24 +2,21 @@
 # =============================================================================
 # Employee Management - NGINX Ingress Controller Module
 # =============================================================================
-# Deploys the NGINX Ingress Controller using the official Helm chart.
+# Purpose:
+#   1. Create the dedicated NGINX Ingress namespace.
+#   2. Deploy NGINX Ingress Controller using the local Helm chart.
+#   3. Keep chart configuration in charts/nginx-ingress/values.yaml.
+#
+# Local chart path:
+#   Terraform-Practice/charts/nginx-ingress/
 #
 # Architecture:
+#   Internet -> AWS Network Load Balancer -> NGINX Ingress
+#             -> Employee Management Kubernetes Services
 #
-# Internet
-#    |
-#    v
-# AWS Network Load Balancer
-#    |
-#    v
-# NGINX Ingress Controller
-#    |
-#    v
-# Kubernetes Services
-#
-# The controller is deployed into the dedicated ingress-nginx namespace.
-# NGINX runs on the Employee Management application worker node.
-# No dedicated IAM role is created by this module.
+# Important:
+#   Run "helm dependency build ./charts/nginx-ingress" from the
+#   Terraform root directory before running Terraform plan/apply.
 # =============================================================================
 
 
@@ -35,6 +32,7 @@ resource "kubernetes_namespace" "nginx_ingress" {
       "app.kubernetes.io/name"       = "ingress-nginx"
       "app.kubernetes.io/component"  = "controller"
       "app.kubernetes.io/managed-by" = "Terraform"
+      "app.kubernetes.io/part-of"    = var.project_name
       "environment"                  = var.environment
     }
   }
@@ -46,138 +44,24 @@ resource "kubernetes_namespace" "nginx_ingress" {
 # =============================================================================
 
 resource "helm_release" "nginx_ingress" {
-  name       = var.release_name
-  repository = "https://kubernetes.github.io/ingress-nginx/"
-  chart      = "ingress-nginx"
-  version    = "4.13.0"
+  name      = var.release_name
+  namespace = kubernetes_namespace.nginx_ingress.metadata[0].name
 
-  namespace        = kubernetes_namespace.nginx_ingress.metadata[0].name
+  # Load the local wrapper chart from the Terraform root directory.
+  chart = "${path.root}/charts/nginx-ingress"
+
+  # The namespace is managed separately by Terraform.
   create_namespace = false
 
-  # ===========================================================================
-  # HELM VALUES
-  # Helm provider 3.x uses a list of objects for the set argument.
-  # ===========================================================================
+  # Wait for Kubernetes resources to become ready.
+  wait    = true
+  timeout = var.helm_timeout
 
-  set = [
-    # -------------------------------------------------------------------------
-    # NGINX CONTROLLER
-    # -------------------------------------------------------------------------
+  # Roll back a failed installation or upgrade.
+  atomic = true
 
-    {
-      name  = "controller.replicaCount"
-      value = tostring(var.replica_count)
-    },
-    {
-      name  = "controller.ingressClassResource.name"
-      value = var.ingress_class_name
-    },
-    {
-      name  = "controller.ingressClassResource.enabled"
-      value = "true"
-    },
-    {
-      name  = "controller.ingressClassResource.default"
-      value = tostring(var.ingress_class_default)
-    },
-
-    # -------------------------------------------------------------------------
-    # SERVICE
-    # -------------------------------------------------------------------------
-
-    {
-      name  = "controller.service.type"
-      value = "LoadBalancer"
-    },
-
-    # -------------------------------------------------------------------------
-    # AWS NETWORK LOAD BALANCER
-    # -------------------------------------------------------------------------
-
-    {
-      name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-type"
-      value = "external"
-    },
-    {
-      name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-nlb-target-type"
-      value = "instance"
-    },
-    {
-      name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-scheme"
-      value = var.load_balancer_scheme
-    },
-
-    # -------------------------------------------------------------------------
-    # EXTERNAL TRAFFIC POLICY
-    # -------------------------------------------------------------------------
-
-    {
-      name  = "controller.service.externalTrafficPolicy"
-      value = var.external_traffic_policy
-    },
-
-    # -------------------------------------------------------------------------
-    # RESOURCE REQUESTS
-    # -------------------------------------------------------------------------
-
-    {
-      name  = "controller.resources.requests.cpu"
-      value = var.cpu_request
-    },
-    {
-      name  = "controller.resources.requests.memory"
-      value = var.memory_request
-    },
-
-    # -------------------------------------------------------------------------
-    # RESOURCE LIMITS
-    # -------------------------------------------------------------------------
-
-    {
-      name  = "controller.resources.limits.cpu"
-      value = var.cpu_limit
-    },
-    {
-      name  = "controller.resources.limits.memory"
-      value = var.memory_limit
-    },
-
-    # -------------------------------------------------------------------------
-    # NODE PLACEMENT
-    # Application node label: workload=application
-    # Application node taint: workload=application:NoSchedule
-    # -------------------------------------------------------------------------
-
-    {
-      name  = "controller.nodeSelector.workload"
-      value = "application"
-    },
-    {
-      name  = "controller.tolerations[0].key"
-      value = "workload"
-    },
-    {
-      name  = "controller.tolerations[0].operator"
-      value = "Equal"
-    },
-    {
-      name  = "controller.tolerations[0].value"
-      value = "application"
-    },
-    {
-      name  = "controller.tolerations[0].effect"
-      value = "NoSchedule"
-    }
-  ]
-
-  # ===========================================================================
-  # HELM RELEASE BEHAVIOR
-  # ===========================================================================
-
-  atomic          = true
+  # Clean up resources created by an unsuccessful installation.
   cleanup_on_fail = true
-  wait            = true
-  timeout         = var.helm_timeout
 
   depends_on = [
     kubernetes_namespace.nginx_ingress

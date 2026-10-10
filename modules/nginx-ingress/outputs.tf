@@ -1,10 +1,11 @@
+
 # =============================================================================
 # Employee Management - NGINX Ingress Controller Outputs
 # =============================================================================
 
 
 # =============================================================================
-# NAMESPACE
+# KUBERNETES NAMESPACE
 # =============================================================================
 
 output "namespace" {
@@ -15,11 +16,11 @@ output "namespace" {
 
 
 # =============================================================================
-# HELM RELEASE
+# HELM RELEASE INFORMATION
 # =============================================================================
 
 output "release_name" {
-  description = "Helm release name of the NGINX Ingress Controller."
+  description = "Name of the NGINX Ingress Controller Helm release."
 
   value = helm_release.nginx_ingress.name
 }
@@ -33,18 +34,18 @@ output "release_status" {
 
 
 output "chart_version" {
-  description = "Installed NGINX Ingress Controller Helm chart version."
+  description = "Version of the local NGINX wrapper Helm chart."
 
   value = helm_release.nginx_ingress.version
 }
 
 
 # =============================================================================
-# INGRESS CLASS
+# LOCAL CHART INFORMATION
 # =============================================================================
 
-output "ingress_class_name" {
-  description = "Kubernetes IngressClass name used by NGINX."
+output "chart_path" {
+  description = "Local filesystem path of the NGINX Ingress Helm chart."
 
-  value = var.ingress_class_name
+  value = "${path.root}/charts/nginx-ingress"
 }

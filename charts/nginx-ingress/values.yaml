@@ -1,0 +1,46 @@
+
+# Configuration for the official ingress-nginx Helm chart.
+ingress-nginx:
+  controller:
+    replicaCount: 1
+
+    # Schedule NGINX on Employee Management application workers.
+    nodeSelector:
+      workload: application
+
+    # Tolerate the application node group's taint.
+    tolerations:
+      - key: workload
+        operator: Equal
+        value: application
+        effect: NoSchedule
+
+    # Ingress class configuration.
+    ingressClass: nginx
+
+    ingressClassResource:
+      enabled: true
+      name: nginx
+      default: false
+      controllerValue: k8s.io/ingress-nginx
+
+    # AWS Network Load Balancer configuration.
+    service:
+      enabled: true
+      type: LoadBalancer
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-type: "external"
+        service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
+        service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+
+    # Controller resource requests and limits.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    admissionWebhooks:
+      enabled: true
