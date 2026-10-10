@@ -132,7 +132,7 @@ pipeline {
                                 echo "ERROR: Terraform init failed after $attempt attempts."
                                 exit 1
                             fi
-                            delay=$((5 * (1 << (attempt - 1))) )
+                            delay=$((5 << (attempt - 1)))
                             echo "Terraform init failed on attempt $attempt."
                             echo "Retrying in $delay seconds..."
                             sleep "$delay"
