@@ -1,4 +1,4 @@
-$Employee Management - Root Terraform Configuration
+#Employee Management - Root Terraform Configuration
 # =============================================================================
 # Wires all infrastructure modules together.
 #
