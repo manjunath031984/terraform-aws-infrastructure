@@ -14,7 +14,7 @@ variable "project_name" {
 variable "state_bucket_name" {
   description = "Globally unique S3 bucket name for Terraform state"
   type        = string
-  default     = "employee-management-terraform-state-ap-southeast-2"
+  default     = "employee-management-terraform-state"
 }
 
 variable "dynamodb_lock_table_name" {

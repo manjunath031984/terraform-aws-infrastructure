@@ -5,7 +5,7 @@ pipeline {
         choice(
             name: 'ACTION',
             choices: ['plan', 'apply', 'destroy'],
-            description: 'Terraform action for the main infrastructure'
+            description: 'Select the main Terraform action'
         )
     }
 
@@ -15,8 +15,6 @@ pipeline {
         EXPECTED_AWS_ACCOUNT_ID  = '129911414812'
         AWS_CREDENTIALS_ID       = 'aws-jenkins-credentials'
         TF_VAR_FILE              = 'environments/dev/terraform.tfvars'
-        STATE_BUCKET             = 'employee-management-terraform-state-ap-southeast-2'
-        LOCK_TABLE               = 'employee-management-terraform-locks'
     }
 
     stages {
@@ -36,8 +34,9 @@ pipeline {
                         set -eu
                         ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
                         echo "Authenticated AWS account: $ACCOUNT_ID"
+
                         if [ "$ACCOUNT_ID" != "$EXPECTED_AWS_ACCOUNT_ID" ]; then
-                            echo "ERROR: Expected AWS account $EXPECTED_AWS_ACCOUNT_ID; stopping."
+                            echo "ERROR: Expected AWS account $EXPECTED_AWS_ACCOUNT_ID."
                             exit 1
                         fi
                     '''
@@ -94,12 +93,29 @@ pipeline {
                     sh '''
                         set -eu
                         ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-                        if [ "$ACCOUNT_ID" != "$EXPECTED_AWS_ACCOUNT_ID" ]; then
-                            echo "ERROR: AWS account mismatch; plan blocked."
-                            exit 1
-                        fi
+                        test "$ACCOUNT_ID" = "$EXPECTED_AWS_ACCOUNT_ID"
                         terraform plan -input=false -var-file="$TF_VAR_FILE" -out=tfplan
                         terraform show -no-color tfplan
+                    '''
+                }
+            }
+        }
+
+        stage('Main Terraform Destroy Plan') {
+            when {
+                expression { params.ACTION == 'destroy' }
+            }
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "${AWS_CREDENTIALS_ID}"
+                ]]) {
+                    sh '''
+                        set -eu
+                        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+                        test "$ACCOUNT_ID" = "$EXPECTED_AWS_ACCOUNT_ID"
+                        terraform plan -destroy -input=false -var-file="$TF_VAR_FILE" -out=destroy.tfplan
+                        terraform show -no-color destroy.tfplan
                     '''
                 }
             }
@@ -111,7 +127,7 @@ pipeline {
             }
             steps {
                 input(
-                    message: "Approve Terraform ${params.ACTION} for AWS account 129911414812 in ap-southeast-2?",
+                    message: "Review the plan and approve ACTION=${params.ACTION} for AWS account 129911414812 in ap-southeast-2.",
                     ok: 'Approve'
                 )
             }
@@ -134,7 +150,7 @@ pipeline {
                             exit 1
                         fi
                         test -f tfplan
-                        terraform apply -input=false -auto-approve tfplan
+                        terraform apply -input=false tfplan
                     '''
                 }
             }
@@ -156,7 +172,8 @@ pipeline {
                             echo "ERROR: AWS account mismatch; destroy blocked."
                             exit 1
                         fi
-                        terraform destroy -input=false -var-file="$TF_VAR_FILE"
+                        test -f destroy.tfplan
+                        terraform apply -input=false destroy.tfplan
                     '''
                 }
             }
@@ -171,7 +188,7 @@ pipeline {
             echo 'Terraform pipeline failed. Check the console output.'
         }
         always {
-            archiveArtifacts artifacts: 'tfplan,bootstrap/bootstrap.tfplan', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'tfplan,destroy.tfplan,bootstrap/bootstrap.tfplan', allowEmptyArchive: true
         }
     }
 }
