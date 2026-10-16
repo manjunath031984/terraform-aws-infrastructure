@@ -36,7 +36,7 @@ module "eks" {
 }
 
 module "eks_node_groups" {
-  source = "./modules/eks-node-groups"
+  source = "./modules/node-groups"
 
   cluster_name       = module.eks.cluster_name
   private_subnet_ids = module.vpc.private_subnet_ids
@@ -58,7 +58,7 @@ module "eks_node_groups" {
 module "eks_addons" {
   source = "./modules/eks-addons"
 
-  cluster_name           = module.eks.cluster_name
+  cluster_name            = module.eks.cluster_name
   cluster_oidc_issuer_url = module.eks.oidc_issuer_url
 
   ebs_csi_role_name = "${var.eks_cluster_name}-ebs-csi-role"
