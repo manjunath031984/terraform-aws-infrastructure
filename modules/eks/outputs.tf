@@ -34,3 +34,7 @@ output "cluster_version" {
   description = "Kubernetes version configured for the cluster"
   value       = aws_eks_cluster.this.version
 }
+output "oidc_issuer_url" {
+  description = "OIDC issuer URL of the EKS cluster"
+  value       = aws_eks_cluster.this.identity[0].oidc[0].issuer
+}

@@ -13,8 +13,3 @@ output "ebs_csi_addon_arn" {
   description = "ARN of the EKS-managed EBS CSI Driver add-on"
   value       = aws_eks_addon.ebs_csi.arn
 }
-
-output "ebs_csi_addon_status" {
-  description = "Current EBS CSI Driver add-on status"
-  value       = aws_eks_addon.ebs_csi.status
-}

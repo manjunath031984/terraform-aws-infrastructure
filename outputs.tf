@@ -48,8 +48,3 @@ output "employee_node_group_name" {
   description = "Employee Management managed node group"
   value       = module.eks_node_groups.employee_node_group_name
 }
-
-output "ebs_csi_addon_status" {
-  description = "EBS CSI Driver add-on status"
-  value       = module.eks_addons.ebs_csi_addon_status
-}
