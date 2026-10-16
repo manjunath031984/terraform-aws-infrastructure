@@ -1,84 +1,40 @@
 
-# =============================================================================
-# Employee Management - EKS Node Groups Module Outputs
-# =============================================================================
+output "node_role_arn" {
+  description = "IAM role ARN shared by both managed node groups"
+  value       = aws_iam_role.nodes.arn
+}
 
-
-# =============================================================================
-# POSTGRESQL NODE GROUP
-# =============================================================================
+output "node_role_name" {
+  description = "IAM role name for EKS worker nodes"
+  value       = aws_iam_role.nodes.name
+}
 
 output "postgres_node_group_name" {
-  description = "Name of the PostgreSQL EKS managed node group."
+  description = "PostgreSQL managed node group name"
   value       = aws_eks_node_group.postgres.node_group_name
 }
 
 output "postgres_node_group_arn" {
-  description = "ARN of the PostgreSQL EKS managed node group."
+  description = "PostgreSQL managed node group ARN"
   value       = aws_eks_node_group.postgres.arn
 }
 
-output "postgres_node_group_id" {
-  description = "ID of the PostgreSQL EKS managed node group."
-  value       = aws_eks_node_group.postgres.id
+output "employee_node_group_name" {
+  description = "Employee Management managed node group name"
+  value       = aws_eks_node_group.employee.node_group_name
+}
+
+output "employee_node_group_arn" {
+  description = "Employee Management managed node group ARN"
+  value       = aws_eks_node_group.employee.arn
 }
 
 output "postgres_node_group_status" {
-  description = "Current status of the PostgreSQL EKS managed node group."
+  description = "PostgreSQL node group status"
   value       = aws_eks_node_group.postgres.status
 }
 
-
-# =============================================================================
-# POSTGRESQL LAUNCH TEMPLATE
-# =============================================================================
-
-output "postgres_launch_template_id" {
-  description = "ID of the PostgreSQL worker launch template."
-  value       = aws_launch_template.postgres.id
-}
-
-output "postgres_launch_template_latest_version" {
-  description = "Latest version of the PostgreSQL worker launch template."
-  value       = aws_launch_template.postgres.latest_version
-}
-
-
-# =============================================================================
-# APPLICATION NODE GROUP
-# =============================================================================
-
-output "application_node_group_name" {
-  description = "Name of the Employee Management application EKS managed node group."
-  value       = aws_eks_node_group.application.node_group_name
-}
-
-output "application_node_group_arn" {
-  description = "ARN of the Employee Management application EKS managed node group."
-  value       = aws_eks_node_group.application.arn
-}
-
-output "application_node_group_id" {
-  description = "ID of the Employee Management application EKS managed node group."
-  value       = aws_eks_node_group.application.id
-}
-
-output "application_node_group_status" {
-  description = "Current status of the Employee Management application EKS managed node group."
-  value       = aws_eks_node_group.application.status
-}
-
-
-# =============================================================================
-# APPLICATION LAUNCH TEMPLATE
-# =============================================================================
-
-output "application_launch_template_id" {
-  description = "ID of the application worker launch template."
-  value       = aws_launch_template.application.id
-}
-
-output "application_launch_template_latest_version" {
-  description = "Latest version of the application worker launch template."
-  value       = aws_launch_template.application.latest_version
+output "employee_node_group_status" {
+  description = "Employee Management node group status"
+  value       = aws_eks_node_group.employee.status
 }

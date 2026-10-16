@@ -1,82 +1,74 @@
-# =============================================================================
-# Employee Management - VPC Module Variables
-# =============================================================================
 
 variable "project_name" {
-  description = "Name of the application or project."
+  description = "Name prefix for AWS resources"
   type        = string
-
-  validation {
-    condition     = length(trimspace(var.project_name)) > 0
-    error_message = "project_name must not be empty."
-  }
+  default     = "employee-management"
 }
 
 variable "environment" {
-  description = "Deployment environment such as dev, staging, or prod."
+  description = "Deployment environment"
   type        = string
-
-  validation {
-    condition = contains(
-      ["dev", "development", "staging", "stage", "prod", "production"],
-      lower(var.environment)
-    )
-
-    error_message = "environment must be dev, development, staging, stage, prod, or production."
-  }
+  default     = "dev"
 }
 
 variable "vpc_cidr" {
-  description = "CIDR block for the Employee Management VPC."
+  description = "CIDR block for the VPC"
   type        = string
-
-  default = "10.0.0.0/16"
+  default     = "10.0.0.0/16"
 }
 
-variable "public_subnets" {
-  description = "Public subnet configuration by subnet key."
-
-  type = map(object({
-    cidr              = string
-    availability_zone = string
-    name              = string
-  }))
+variable "availability_zones" {
+  description = "Exactly two Availability Zones in the selected region"
+  type        = list(string)
 
   validation {
-    condition     = length(var.public_subnets) == 2
-    error_message = "Exactly two public subnets are required for the two-AZ architecture."
+    condition     = length(var.availability_zones) == 2
+    error_message = "Provide exactly two Availability Zones."
   }
 }
 
-variable "private_subnets" {
-  description = "Private subnet configuration by subnet key."
-
-  type = map(object({
-    cidr              = string
-    availability_zone = string
-    name              = string
-    nat_gateway_key   = string
-  }))
+variable "public_subnet_cidrs" {
+  description = "CIDR blocks for public ALB subnets"
+  type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24"]
 
   validation {
-    condition     = length(var.private_subnets) == 2
-    error_message = "Exactly two private subnets are required for the two-AZ architecture."
+    condition     = length(var.public_subnet_cidrs) == 2
+    error_message = "Provide exactly two public subnet CIDRs."
   }
 }
 
-variable "common_tags" {
-  description = "Common tags applied to every VPC resource."
+variable "private_subnet_cidrs" {
+  description = "CIDR blocks for private EKS worker subnets"
+  type        = list(string)
+  default     = ["10.0.11.0/24", "10.0.12.0/24"]
+
+  validation {
+    condition     = length(var.private_subnet_cidrs) == 2
+    error_message = "Provide exactly two private subnet CIDRs."
+  }
+}
+
+variable "enable_nat_gateway" {
+  description = "Create a NAT Gateway for private subnet outbound access"
+  type        = bool
+  default     = true
+}
+
+variable "single_nat_gateway" {
+  description = "Use one NAT Gateway instead of one per AZ"
+  type        = bool
+  default     = true
+}
+
+variable "eks_cluster_name" {
+  description = "EKS cluster name used for subnet discovery tags"
+  type        = string
+  default     = "employee-management-eks"
+}
+
+variable "tags" {
+  description = "Additional resource tags"
   type        = map(string)
-
-  default = {}
-
-  validation {
-    condition = alltrue([
-      for key, value in var.common_tags :
-      length(trimspace(key)) > 0 && length(trimspace(value)) > 0
-    ])
-
-    error_message = "All common tag keys and values must be non-empty."
-  }
-
+  default     = {}
 }

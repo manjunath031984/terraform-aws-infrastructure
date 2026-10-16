@@ -1,174 +1,94 @@
 
-# =============================================================================
-# Employee Management - VPC Module
-# =============================================================================
+terraform {
+  required_providers {
+    aws = {
+      source = "hashicorp/aws"
+    }
+  }
+}
 
-# -----------------------------------------------------------------------------
+locals {
+  name = "${var.project_name}-${var.environment}"
+
+  common_tags = merge(
+    {
+      Project     = var.project_name
+      Environment = var.environment
+      ManagedBy   = "Terraform"
+    },
+    var.tags
+  )
+
+  nat_gateway_count = var.enable_nat_gateway ? (
+    var.single_nat_gateway ? 1 : 2
+  ) : 0
+}
+
 # VPC
-# -----------------------------------------------------------------------------
-
 resource "aws_vpc" "this" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = merge(
-    var.common_tags,
-    {
-      Name      = "${var.project_name}-vpc"
-      Module    = "VPC"
-      Component = "Network"
-      Purpose   = "Primary VPC for Employee Management EKS infrastructure"
-      Resource  = "VPC"
-    }
-  )
+  tags = merge(local.common_tags, {
+    Name = "${local.name}-vpc"
+  })
 }
 
-# -----------------------------------------------------------------------------
-# Internet Gateway
-# -----------------------------------------------------------------------------
+# Availability Zones
+# AZ names are supplied by the root module to keep
+# this VPC module reusable.
 
+# Internet Gateway
 resource "aws_internet_gateway" "this" {
   vpc_id = aws_vpc.this.id
 
-  tags = merge(
-    var.common_tags,
-    {
-      Name      = "${var.project_name}-igw"
-      Module    = "VPC"
-      Component = "Internet Gateway"
-      Purpose   = "Provides internet connectivity for public subnets"
-      Resource  = "InternetGateway"
-    }
-  )
+  tags = merge(local.common_tags, {
+    Name = "${local.name}-igw"
+  })
 }
 
-# =============================================================================
-# PUBLIC SUBNETS
-# =============================================================================
-
+# Public subnets: ALB
 resource "aws_subnet" "public" {
-  for_each = var.public_subnets
+  count = 2
 
   vpc_id                  = aws_vpc.this.id
-  cidr_block              = each.value.cidr
-  availability_zone       = each.value.availability_zone
+  cidr_block              = var.public_subnet_cidrs[count.index]
+  availability_zone       = var.availability_zones[count.index]
   map_public_ip_on_launch = true
 
-  tags = merge(
-    var.common_tags,
-    {
-      Name                     = each.value.name
-      Module                   = "VPC"
-      Component                = "Public Subnet"
-      Purpose                  = "Public subnet for AWS Load Balancers and internet-facing resources"
-      Resource                 = "Subnet"
-      Type                     = "Public"
-      "kubernetes.io/role/elb" = "1"
-    }
-  )
+  tags = merge(local.common_tags, {
+    Name                     = "${local.name}-public-${count.index + 1}"
+    "kubernetes.io/role/elb" = "1"
+    "kubernetes.io/cluster/${var.eks_cluster_name}" = "shared"
+  })
 }
 
-# =============================================================================
-# PRIVATE SUBNETS
-# =============================================================================
-
+# Private subnets: EKS worker nodes
 resource "aws_subnet" "private" {
-  for_each = var.private_subnets
+  count = 2
 
-  vpc_id                  = aws_vpc.this.id
-  cidr_block              = each.value.cidr
-  availability_zone       = each.value.availability_zone
+  vpc_id            = aws_vpc.this.id
+  cidr_block        = var.private_subnet_cidrs[count.index]
+  availability_zone = var.availability_zones[count.index]
+
   map_public_ip_on_launch = false
 
-  tags = merge(
-    var.common_tags,
-    {
-      Name                              = each.value.name
-      Module                            = "VPC"
-      Component                         = "Private Subnet"
-      Purpose                           = "Private subnet for EKS worker nodes and application workloads"
-      Resource                          = "Subnet"
-      Type                              = "Private"
-      "kubernetes.io/role/internal-elb" = "1"
-    }
-  )
+  tags = merge(local.common_tags, {
+    Name                              = "${local.name}-private-${count.index + 1}"
+    "kubernetes.io/role/internal-elb" = "1"
+    "kubernetes.io/cluster/${var.eks_cluster_name}" = "shared"
+  })
 }
 
-# =============================================================================
-# ELASTIC IP ADDRESSES FOR NAT GATEWAYS
-# =============================================================================
-
-resource "aws_eip" "nat" {
-  for_each = var.public_subnets
-
-  domain = "vpc"
-
-  tags = merge(
-    var.common_tags,
-    {
-      Name      = "${var.project_name}-nat-eip-${each.value.name}"
-      Module    = "VPC"
-      Component = "NAT Gateway Elastic IP"
-      Purpose   = "Elastic IP address for NAT Gateway"
-      Resource  = "ElasticIP"
-    }
-  )
-
-  depends_on = [
-    aws_internet_gateway.this
-  ]
-}
-
-# =============================================================================
-# NAT GATEWAYS
-# =============================================================================
-
-resource "aws_nat_gateway" "this" {
-  for_each = var.public_subnets
-
-  allocation_id = aws_eip.nat[each.key].id
-  subnet_id     = aws_subnet.public[each.key].id
-
-  tags = merge(
-    var.common_tags,
-    {
-      Name      = "${var.project_name}-nat-${each.value.name}"
-      Module    = "VPC"
-      Component = "NAT Gateway"
-      Purpose   = "Provides outbound internet access for private subnets"
-      Resource  = "NATGateway"
-    }
-  )
-
-  depends_on = [
-    aws_internet_gateway.this
-  ]
-}
-
-# =============================================================================
-# PUBLIC ROUTE TABLE
-# =============================================================================
-
+# Public route table
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.this.id
 
-  tags = merge(
-    var.common_tags,
-    {
-      Name      = "${var.project_name}-public-rt"
-      Module    = "VPC"
-      Component = "Public Route Table"
-      Purpose   = "Routes public subnet traffic to the Internet Gateway"
-      Resource  = "RouteTable"
-      Type      = "Public"
-    }
-  )
+  tags = merge(local.common_tags, {
+    Name = "${local.name}-public-rt"
+  })
 }
-
-# -----------------------------------------------------------------------------
-# Public Route - Internet Gateway
-# -----------------------------------------------------------------------------
 
 resource "aws_route" "public_internet" {
   route_table_id         = aws_route_table.public.id
@@ -176,58 +96,69 @@ resource "aws_route" "public_internet" {
   gateway_id             = aws_internet_gateway.this.id
 }
 
-# -----------------------------------------------------------------------------
-# Associate Public Subnets
-# -----------------------------------------------------------------------------
-
 resource "aws_route_table_association" "public" {
-  for_each = var.public_subnets
+  count = 2
 
-  subnet_id      = aws_subnet.public[each.key].id
+  subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
 }
 
-# =============================================================================
-# PRIVATE ROUTE TABLES
-# =============================================================================
+# Elastic IPs for NAT Gateways
+resource "aws_eip" "nat" {
+  count  = local.nat_gateway_count
+  domain = "vpc"
 
+  tags = merge(local.common_tags, {
+    Name = "${local.name}-nat-eip-${count.index + 1}"
+  })
+}
+
+# NAT Gateways
+resource "aws_nat_gateway" "this" {
+  count = local.nat_gateway_count
+
+  allocation_id = aws_eip.nat[count.index].id
+
+  subnet_id = aws_subnet.public[
+    var.single_nat_gateway ? 0 : count.index
+  ].id
+
+  depends_on = [aws_internet_gateway.this]
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name}-nat-${count.index + 1}"
+  })
+}
+
+# Private route tables
 resource "aws_route_table" "private" {
-  for_each = var.private_subnets
+  count = var.single_nat_gateway ? 1 : 2
 
   vpc_id = aws_vpc.this.id
 
-  tags = merge(
-    var.common_tags,
-    {
-      Name      = "${each.value.name}-rt"
-      Module    = "VPC"
-      Component = "Private Route Table"
-      Purpose   = "Routes private subnet outbound traffic through NAT Gateway"
-      Resource  = "RouteTable"
-      Type      = "Private"
-    }
-  )
+  tags = merge(local.common_tags, {
+    Name = "${local.name}-private-rt-${count.index + 1}"
+  })
 }
-
-# -----------------------------------------------------------------------------
-# Private Routes - NAT Gateway
-# -----------------------------------------------------------------------------
 
 resource "aws_route" "private_nat" {
-  for_each = var.private_subnets
+  count = local.nat_gateway_count
 
-  route_table_id         = aws_route_table.private[each.key].id
+  route_table_id = aws_route_table.private[
+    var.single_nat_gateway ? 0 : count.index
+  ].id
+
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.this[each.value.nat_gateway_key].id
+  nat_gateway_id         = aws_nat_gateway.this[count.index].id
 }
 
-# -----------------------------------------------------------------------------
-# Associate Private Subnets
-# -----------------------------------------------------------------------------
-
+# Associate each private subnet with its route table
 resource "aws_route_table_association" "private" {
-  for_each = var.private_subnets
+  count = 2
 
-  subnet_id      = aws_subnet.private[each.key].id
-  route_table_id = aws_route_table.private[each.key].id
+  subnet_id = aws_subnet.private[count.index].id
+
+  route_table_id = aws_route_table.private[
+    var.single_nat_gateway ? 0 : count.index
+  ].id
 }
