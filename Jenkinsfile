@@ -18,12 +18,17 @@ pipeline {
     }
 
     environment {
-        AWS_DEFAULT_REGION = 'ap-southeast-2'
-        AWS_REGION = 'ap-southeast-2'
+        AWS_DEFAULT_REGION  = 'ap-southeast-2'
+        AWS_REGION          = 'ap-southeast-2'
         EXPECTED_AWS_ACCOUNT_ID = '129911414812'
-        AWS_CREDENTIALS_ID = 'aws-jenkins-credentials'
-        TF_VAR_FILE = 'environments/dev/terraform.tfvars'
-        TF_STATE_BUCKET = 'employee-management-terraform-state'
+        AWS_CREDENTIALS_ID  = 'aws-jenkins-credentials'
+
+        TF_VAR_FILE         = 'environments/dev/terraform.tfvars'
+        TF_STATE_BUCKET     = 'employee-management-terraform-state'
+        TF_STATE_KEY        = 'employee-management/dev/terraform.tfstate'
+
+        TF_IN_AUTOMATION    = 'true'
+        TF_INPUT            = 'false'
     }
 
     stages {
@@ -33,14 +38,22 @@ pipeline {
             }
         }
 
-        stage('Verify Tools') {
+        stage('Verify Tools and Project') {
             steps {
                 sh '''
                     set -eu
+
                     command -v aws
                     command -v terraform
+                    command -v curl
                     aws --version
                     terraform version
+
+                    test -f backend.tf
+                    test -f main.tf
+                    test -f "$TF_VAR_FILE"
+
+                    echo "Terraform project root verified."
                 '''
             }
         }
@@ -83,18 +96,18 @@ pipeline {
                         BUCKET="$TF_STATE_BUCKET"
                         REGION="$AWS_DEFAULT_REGION"
 
-                        echo "Bootstrapping Terraform state bucket: $BUCKET"
+                        echo "Preparing state bucket: $BUCKET"
 
                         if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
-                            echo "Bucket already exists and is accessible."
+                            echo "Bucket exists and is accessible."
                         else
-                            echo "Creating bucket in $REGION..."
+                            echo "Attempting to create the bucket."
 
                             aws s3api create-bucket \
                                 --bucket "$BUCKET" \
                                 --region "$REGION" \
                                 --create-bucket-configuration \
-                                LocationConstraint="$REGION"
+                                "LocationConstraint=$REGION"
                         fi
 
                         aws s3api put-public-access-block \
@@ -114,17 +127,19 @@ pipeline {
                         aws s3api put-bucket-encryption \
                             --bucket "$BUCKET" \
                             --server-side-encryption-configuration \
-                            '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"},"BucketKeyEnabled":true}]}'
+                            '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
 
-                        aws s3api head-bucket --bucket "$BUCKET"
+                        aws s3api get-bucket-location \
+                            --bucket "$BUCKET"
 
-                        echo "Terraform state bucket is ready."
+                        echo "Bucket configuration completed."
+                        echo "IMPORTANT: Bucket creation does not restore a deleted Terraform state file."
                     '''
                 }
             }
         }
 
-        stage('Main Terraform Init and Validate') {
+        stage('Verify Existing Terraform State') {
             when {
                 expression { params.ACTION != 'bootstrap' }
             }
@@ -136,15 +151,66 @@ pipeline {
                     sh '''
                         set -eu
 
-                        test -f "$TF_VAR_FILE"
-                        test -f backend.tf
-
-                        echo "Checking Terraform state bucket..."
+                        echo "Checking state bucket access..."
 
                         aws s3api head-bucket \
                             --bucket "$TF_STATE_BUCKET"
 
-                        terraform init -input=false -reconfigure
+                        echo "Checking the expected Terraform state object..."
+
+                        if aws s3api head-object \
+                            --bucket "$TF_STATE_BUCKET" \
+                            --key "$TF_STATE_KEY" \
+                            >/dev/null 2>&1; then
+                            echo "Terraform state object exists."
+                        else
+                            echo "ERROR: Terraform state object is missing or inaccessible."
+                            echo "Bucket: $TF_STATE_BUCKET"
+                            echo "Key: $TF_STATE_KEY"
+                            echo "Check IAM permissions, bucket policy, and state recovery."
+                            echo "Do not apply or destroy infrastructure until resolved."
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Init and Validate') {
+            when {
+                expression { params.ACTION != 'bootstrap' }
+            }
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "${AWS_CREDENTIALS_ID}"
+                ]]) {
+                    sh '''
+                        set -eu
+
+                        echo "Checking provider registry connectivity..."
+
+                        curl -fsSIL --retry 2 --retry-delay 2 \
+                            https://releases.hashicorp.com/ \
+                            >/dev/null
+
+                        echo "Initializing Terraform with the configured S3 backend..."
+
+                        attempt=1
+                        max_attempts=3
+
+                        until terraform init -input=false -reconfigure; do
+                            if [ "$attempt" -ge "$max_attempts" ]; then
+                                echo "ERROR: Terraform initialization failed after $attempt attempts."
+                                echo "Check provider downloads, network access, S3 permissions, and backend configuration."
+                                exit 1
+                            fi
+
+                            attempt=$((attempt + 1))
+                            echo "Initialization failed. Retrying ($attempt/$max_attempts)..."
+                            sleep 5
+                        done
+
                         terraform fmt -check -recursive
                         terraform validate
                     '''
