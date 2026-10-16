@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -30,9 +29,7 @@ pipeline {
                 sh '''
                     set -eu
                     command -v aws
-                    command -v python3
                     aws --version
-                    python3 --version
                 '''
             }
         }
@@ -77,10 +74,8 @@ pipeline {
                         do
                             echo "Checking bucket: ${BUCKET}"
 
-                            if aws s3api head-bucket \
-                                --bucket "$BUCKET" 2>/dev/null; then
-                                aws s3api get-bucket-location \
-                                    --bucket "$BUCKET"
+                            if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+                                aws s3api get-bucket-location --bucket "$BUCKET"
                             else
                                 echo "Bucket not found or access denied: ${BUCKET}"
                             fi
@@ -123,142 +118,70 @@ Confirm that you have backed up any state you need.
                     sh '''
                         set -eu
 
-                        python3 - <<'PY'
-import json
-import subprocess
-import sys
+                        # Delete every object version / delete marker of one type
+                        # (Versions or DeleteMarkers), 1000 at a time.
+                        purge() {
+                            BUCKET="$1"
+                            TYPE="$2"
+                            LOOPS=0
 
-buckets = [
-    "employee-management-terraform-state",
-    "employee-management-terraform-state-ap-southeast-2",
-]
+                            while true; do
+                                FIRST=$(aws s3api list-object-versions \
+                                    --bucket "$BUCKET" --max-items 1 \
+                                    --query "${TYPE}[0].Key" --output text)
 
-region = "ap-southeast-2"
+                                if [ -z "$FIRST" ] || [ "$FIRST" = "None" ]; then
+                                    break
+                                fi
 
-def aws_json(*args):
-    result = subprocess.run(
-        ["aws", *args, "--region", region, "--output", "json"],
-        text=True,
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"AWS CLI failed: {' '.join(args)}\\n{result.stderr}"
-        )
-    return json.loads(result.stdout or "{}")
+                                LOOPS=$((LOOPS + 1))
+                                if [ "$LOOPS" -gt 500 ]; then
+                                    echo "ERROR: too many delete loops for ${BUCKET}. Aborting."
+                                    exit 1
+                                fi
 
-def aws_run(*args):
-    subprocess.run(
-        ["aws", *args, "--region", region],
-        check=True,
-    )
+                                PAYLOAD=$(aws s3api list-object-versions \
+                                    --bucket "$BUCKET" --max-items 1000 \
+                                    --query "{Objects: ${TYPE}[].{Key:Key,VersionId:VersionId}}" \
+                                    --output json)
 
-account = aws_json(
-    "sts", "get-caller-identity"
-)["Account"]
+                                aws s3api delete-objects \
+                                    --bucket "$BUCKET" \
+                                    --delete "$PAYLOAD" > /dev/null
 
-if account != "129911414812":
-    sys.exit(f"Unexpected AWS account: {account}. Aborting.")
+                                echo "Deleted a batch of ${TYPE} from ${BUCKET}"
+                            done
+                        }
 
-for bucket in buckets:
-    print(f"\\nProcessing bucket: {bucket}", flush=True)
+                        for BUCKET in \
+                            employee-management-terraform-state \
+                            employee-management-terraform-state-ap-southeast-2
+                        do
+                            echo ""
+                            echo "Processing bucket: ${BUCKET}"
 
-    check = subprocess.run(
-        [
-            "aws", "s3api", "head-bucket",
-            "--bucket", bucket,
-            "--region", region,
-        ],
-        capture_output=True,
-        text=True,
-    )
+                            if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+                                echo "Bucket unavailable or not found: ${BUCKET}. Aborting to avoid deleting the wrong resource."
+                                exit 1
+                            fi
 
-    if check.returncode != 0:
-        print(
-            f"Bucket unavailable or not found: {bucket}. "
-            "Aborting to avoid deleting the wrong resource."
-        )
-        sys.exit(1)
+                            LOCATION=$(aws s3api get-bucket-location \
+                                --bucket "$BUCKET" \
+                                --query LocationConstraint --output text)
 
-    # Ensure the bucket is in the expected region.
-    location = aws_json(
-        "s3api", "get-bucket-location",
-        "--bucket", bucket,
-    ).get("LocationConstraint")
+                            if [ "$LOCATION" != "ap-southeast-2" ]; then
+                                echo "Unexpected region for ${BUCKET}: ${LOCATION}. Aborting."
+                                exit 1
+                            fi
 
-    if location not in (None, "ap-southeast-2"):
-        sys.exit(
-            f"Unexpected region for {bucket}: {location}. Aborting."
-        )
+                            purge "$BUCKET" Versions
+                            purge "$BUCKET" DeleteMarkers
 
-    # AWS CLI automatically paginates list-object-versions.
-    versions = aws_json(
-        "s3api", "list-object-versions",
-        "--bucket", bucket,
-    )
+                            aws s3api delete-bucket --bucket "$BUCKET"
+                            echo "Successfully deleted bucket: ${BUCKET}"
+                        done
 
-    objects = [
-        {"Key": item["Key"], "VersionId": item["VersionId"]}
-        for item in versions.get("Versions", [])
-    ]
-    objects.extend(
-        {"Key": item["Key"], "VersionId": item["VersionId"]}
-        for item in versions.get("DeleteMarkers", [])
-    )
-
-    # Delete in batches of at most 1000 objects.
-    for start in range(0, len(objects), 1000):
-        batch = objects[start:start + 1000]
-
-        payload = json.dumps({
-            "Objects": batch,
-            "Quiet": True,
-        })
-
-        result = subprocess.run(
-            [
-                "aws", "s3api", "delete-objects",
-                "--bucket", bucket,
-                "--delete", payload,
-                "--region", region,
-                "--output", "json",
-            ],
-            text=True,
-            capture_output=True,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed deleting objects from {bucket}: "
-                f"{result.stderr}"
-            )
-
-        response = json.loads(result.stdout or "{}")
-        if response.get("Errors"):
-            raise RuntimeError(
-                f"Deletion errors in {bucket}: "
-                f"{response['Errors']}"
-            )
-
-        print(
-            f"Deleted batch of {len(batch)} versions/markers.",
-            flush=True,
-        )
-
-    # Verify the bucket has no versions or delete markers left.
-    remaining = aws_json(
-        "s3api", "list-object-versions",
-        "--bucket", bucket,
-    )
-
-    if remaining.get("Versions") or remaining.get("DeleteMarkers"):
-        sys.exit(f"Bucket still contains versions or markers: {bucket}")
-
-    aws_run("s3api", "delete-bucket", "--bucket", bucket)
-    print(f"Successfully deleted bucket: {bucket}", flush=True)
-
-print("\\nBoth requested buckets have been deleted.")
-PY
+                        echo "Both requested buckets have been deleted."
                     '''
                 }
             }
@@ -277,8 +200,7 @@ PY
                             employee-management-terraform-state \
                             employee-management-terraform-state-ap-southeast-2
                         do
-                            if aws s3api head-bucket \
-                                --bucket "$BUCKET" 2>/dev/null; then
+                            if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
                                 echo "ERROR: Bucket still exists: $BUCKET"
                                 exit 1
                             else
