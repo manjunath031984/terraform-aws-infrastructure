@@ -120,35 +120,35 @@ stage('Bootstrap State Resources') {
 
 
         stage('Terraform Plan') {
-            when {
-                expression {
-                    params.ACTION == 'plan' || params.ACTION == 'apply'
-                }
-            }
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "${AWS_CREDENTIALS_ID}"
-                ]]) {
-                    sh '''
-                        set -eu
+    steps {
+        withCredentials([
+            [$class: 'AmazonWebServicesCredentialsBinding',
+             credentialsId: 'aws-jenkins-credentials']
+        ]) {
+            sh '''
+                set -eu
 
-                        ACCOUNT_ID=$(aws sts get-caller-identity \
-                            --query Account --output text)
+                echo "Verifying AWS identity..."
+                ACCOUNT_ID=$(aws sts get-caller-identity \
+                    --query Account --output text)
 
-                        test "$ACCOUNT_ID" = "$EXPECTED_AWS_ACCOUNT_ID"
+                test "$ACCOUNT_ID" = "129911414812"
 
-                        terraform plan \
-                            -input=false \
-                            -var-file="$TF_VAR_FILE" \
-                            -out=tfplan
+                echo "Initializing Terraform S3 backend..."
+                terraform init -input=false -reconfigure
 
-                        echo "========== Terraform Plan =========="
-                        terraform show -no-color tfplan
-                    '''
-                }
-            }
+                echo "Validating Terraform configuration..."
+                terraform validate
+
+                echo "Creating Terraform plan..."
+                terraform plan \
+                    -input=false \
+                    -var-file=environments/dev/terraform.tfvars \
+                    -out=tfplan
+            '''
         }
+    }
+}
 
         stage('Terraform Destroy Plan') {
             when {
