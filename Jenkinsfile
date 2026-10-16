@@ -65,59 +65,59 @@ pipeline {
             }
         }
 
-        stage('Bootstrap State Resources') {
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "${AWS_CREDENTIALS_ID}"
-                ]]) {
-                    dir('bootstrap') {
-                        sh '''
-                            set -eu
+        
+stage('Bootstrap State Resources') {
+    steps {
+        withCredentials([[
+            $class: 'AmazonWebServicesCredentialsBinding',
+            credentialsId: "${AWS_CREDENTIALS_ID}"
+        ]]) {
+            dir('bootstrap') {
+                sh '''
+                    set -eu
 
-                            terraform init -input=false
-                            terraform fmt -check
-                            terraform validate
+                    BUCKET_NAME="employee-management-terraform-state"
+                    LOCK_TABLE="employee-management-terraform-locks"
+                    REGION="$AWS_DEFAULT_REGION"
 
-                            terraform plan \
-                                -input=false \
-                                -out=bootstrap.tfplan
+                    echo "Checking S3 bucket: $BUCKET_NAME"
 
-                            terraform show -no-color bootstrap.tfplan
+                    if aws s3api head-bucket \
+                        --bucket "$BUCKET_NAME" \
+                        --region "$REGION" 2>/dev/null; then
+                        echo "S3 bucket already exists and is accessible."
+                    else
+                        echo "S3 bucket is not accessible or does not exist."
+                    fi
 
-                            # Preserve the existing bootstrap-first flow.
-                            # Bootstrap resources must be protected from
-                            # accidental destruction.
-                            terraform apply \
-                                -input=false \
-                                bootstrap.tfplan
-                        '''
-                    }
-                }
+                    echo "Checking DynamoDB table: $LOCK_TABLE"
+
+                    if aws dynamodb describe-table \
+                        --table-name "$LOCK_TABLE" \
+                        --region "$REGION" >/dev/null 2>&1; then
+                        echo "DynamoDB table already exists."
+                    else
+                        echo "DynamoDB table is not accessible or does not exist."
+                    fi
+
+                    terraform init -input=false
+                    terraform fmt -check
+                    terraform validate
+
+                    echo "Checking bootstrap Terraform state..."
+                    terraform state list || true
+
+                    echo "Generating bootstrap plan..."
+                    terraform plan -input=false -out=bootstrap.tfplan
+
+                    echo "Review the bootstrap plan before applying."
+                    terraform show -no-color bootstrap.tfplan
+                '''
             }
         }
+    }
+}
 
-        stage('Terraform Init and Validate') {
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "${AWS_CREDENTIALS_ID}"
-                ]]) {
-                    sh '''
-                        set -eu
-
-                        test -f "$TF_VAR_FILE" || {
-                            echo "ERROR: Terraform variable file not found: $TF_VAR_FILE"
-                            exit 1
-                        }
-
-                        terraform init -input=false
-                        terraform fmt -check -recursive
-                        terraform validate
-                    '''
-                }
-            }
-        }
 
         stage('Terraform Plan') {
             when {
