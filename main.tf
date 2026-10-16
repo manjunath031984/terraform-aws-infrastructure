@@ -69,3 +69,13 @@ module "eks_addons" {
     module.eks
   ]
 }
+
+module "nginx_ingress" {
+  source = "./modules/nginx-ingress"
+
+  namespace     = "ingress-nginx"
+  release_name  = "ingress-nginx"
+  chart_version = "4.13.3"
+  scheme        = "internet-facing"
+}
+

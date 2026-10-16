@@ -48,7 +48,7 @@ resource "aws_internet_gateway" "this" {
   })
 }
 
-# Public subnets: ALB
+# Public subnets: NGINX Ingress Controller / NLB
 resource "aws_subnet" "public" {
   count = 2
 
@@ -68,10 +68,9 @@ resource "aws_subnet" "public" {
 resource "aws_subnet" "private" {
   count = 2
 
-  vpc_id            = aws_vpc.this.id
-  cidr_block        = var.private_subnet_cidrs[count.index]
-  availability_zone = var.availability_zones[count.index]
-
+  vpc_id                  = aws_vpc.this.id
+  cidr_block              = var.private_subnet_cidrs[count.index]
+  availability_zone       = var.availability_zones[count.index]
   map_public_ip_on_launch = false
 
   tags = merge(local.common_tags, {
@@ -109,7 +108,7 @@ resource "aws_eip" "nat" {
   domain = "vpc"
 
   tags = merge(local.common_tags, {
-    Name = "${local.name}-nat-eip-${count.index + 1}"
+    Name = local.nat_gateway_count == 1 ? "${local.name}-nat-eip" : "${local.name}-nat-eip-${count.index + 1}"
   })
 }
 
@@ -126,7 +125,7 @@ resource "aws_nat_gateway" "this" {
   depends_on = [aws_internet_gateway.this]
 
   tags = merge(local.common_tags, {
-    Name = "${local.name}-nat-${count.index + 1}"
+    Name = local.nat_gateway_count == 1 ? "${local.name}-nat" : "${local.name}-nat-${count.index + 1}"
   })
 }
 
@@ -137,7 +136,7 @@ resource "aws_route_table" "private" {
   vpc_id = aws_vpc.this.id
 
   tags = merge(local.common_tags, {
-    Name = "${local.name}-private-rt-${count.index + 1}"
+    Name = var.single_nat_gateway ? "${local.name}-private-rt" : "${local.name}-private-rt-${count.index + 1}"
   })
 }
 
