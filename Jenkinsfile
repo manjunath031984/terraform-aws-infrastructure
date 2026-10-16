@@ -188,7 +188,12 @@ pipeline {
             echo 'Terraform pipeline failed. Check the console output.'
         }
         always {
+            // Archive Terraform plans before deleting the workspace.
             archiveArtifacts artifacts: 'tfplan,destroy.tfplan,bootstrap/bootstrap.tfplan', allowEmptyArchive: true
+
+            echo 'Cleaning Jenkins workspace...'
+            deleteDir()
+            echo 'Workspace cleanup completed.'
         }
     }
 }
