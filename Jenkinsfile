@@ -1,18 +1,19 @@
+
 pipeline {
     agent any
 
     options {
         timestamps()
         disableConcurrentBuilds()
-        timeout(time: 60, unit: 'MINUTES')
         skipDefaultCheckout(true)
+        timeout(time: 60, unit: 'MINUTES')
     }
 
     parameters {
         choice(
             name: 'ACTION',
-            choices: ['bootstrap', 'plan', 'apply', 'destroy'],
-            description: 'Select Terraform action'
+            choices: ['plan', 'apply', 'destroy'],
+            description: 'Select the Terraform action to execute.'
         )
     }
 
@@ -22,184 +23,109 @@ pipeline {
         EXPECTED_AWS_ACCOUNT_ID = '129911414812'
         AWS_CREDENTIALS_ID      = 'aws-jenkins-credentials'
         TF_VAR_FILE             = 'environments/dev/terraform.tfvars'
-        TF_STATE_BUCKET         = 'employee-management-terraform-state'
-        TF_STATE_KEY            = 'employee-management/dev/terraform.tfstate'
         TF_IN_AUTOMATION        = 'true'
-        TF_INPUT                = 'false'
     }
 
     stages {
-        stage('Checkout and Verify') {
+        stage('Checkout') {
             steps {
                 checkout scm
+            }
+        }
 
-                sh '''
-                    set -eu
-                    command -v aws
-                    command -v terraform
-                    test -f backend.tf
-                    test -f main.tf
-                    test -f "$TF_VAR_FILE"
-
-                    aws --version
-                    terraform version
-                '''
-
+        stage('Verify Tools and AWS Account') {
+            steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: "${AWS_CREDENTIALS_ID}"
                 ]]) {
                     sh '''
                         set -eu
+
+                        command -v terraform
+                        command -v aws
+
+                        terraform version
+                        aws --version
 
                         ACCOUNT_ID=$(aws sts get-caller-identity \
                             --query Account --output text)
 
-                        echo "Authenticated AWS account: $ACCOUNT_ID"
+                        echo "Authenticated AWS account: ${ACCOUNT_ID}"
+                        echo "AWS region: ${AWS_DEFAULT_REGION}"
 
-                        test "$ACCOUNT_ID" = "$EXPECTED_AWS_ACCOUNT_ID" || {
-                            echo "ERROR: Unexpected AWS account."
+                        if [ "$ACCOUNT_ID" != "$EXPECTED_AWS_ACCOUNT_ID" ]; then
+                            echo "ERROR: AWS account mismatch."
+                            echo "Expected: $EXPECTED_AWS_ACCOUNT_ID"
+                            echo "Actual:   $ACCOUNT_ID"
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Bootstrap State Resources') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "${AWS_CREDENTIALS_ID}"
+                ]]) {
+                    dir('bootstrap') {
+                        sh '''
+                            set -eu
+
+                            terraform init -input=false
+                            terraform fmt -check
+                            terraform validate
+
+                            terraform plan \
+                                -input=false \
+                                -out=bootstrap.tfplan
+
+                            terraform show -no-color bootstrap.tfplan
+
+                            # Preserve the existing bootstrap-first flow.
+                            # Bootstrap resources must be protected from
+                            # accidental destruction.
+                            terraform apply \
+                                -input=false \
+                                bootstrap.tfplan
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Init and Validate') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "${AWS_CREDENTIALS_ID}"
+                ]]) {
+                    sh '''
+                        set -eu
+
+                        test -f "$TF_VAR_FILE" || {
+                            echo "ERROR: Terraform variable file not found: $TF_VAR_FILE"
                             exit 1
                         }
-                    '''
-                }
-            }
-        }
 
-        stage('Bootstrap State Bucket') {
-            when {
-                expression { params.ACTION == 'bootstrap' }
-            }
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "${AWS_CREDENTIALS_ID}"
-                ]]) {
-                    sh '''
-                        set -eu
-
-                        if ! aws s3api head-bucket \
-                            --bucket "$TF_STATE_BUCKET" 2>/dev/null; then
-
-                            echo "Creating state bucket..."
-
-                            aws s3api create-bucket \
-                                --bucket "$TF_STATE_BUCKET" \
-                                --region "$AWS_DEFAULT_REGION" \
-                                --create-bucket-configuration \
-                                "LocationConstraint=$AWS_DEFAULT_REGION"
-                        fi
-
-                        aws s3api put-public-access-block \
-                            --bucket "$TF_STATE_BUCKET" \
-                            --public-access-block-configuration \
-                            'BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true'
-
-                        aws s3api put-bucket-ownership-controls \
-                            --bucket "$TF_STATE_BUCKET" \
-                            --ownership-controls \
-                            'Rules=[{ObjectOwnership=BucketOwnerEnforced}]'
-
-                        aws s3api put-bucket-versioning \
-                            --bucket "$TF_STATE_BUCKET" \
-                            --versioning-configuration Status=Enabled
-
-                        aws s3api put-bucket-encryption \
-                            --bucket "$TF_STATE_BUCKET" \
-                            --server-side-encryption-configuration \
-                            '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
-
-                        echo "State bucket configuration completed."
-                        echo "This stage does not restore a missing Terraform state file."
-                    '''
-                }
-            }
-        }
-
-        stage('Initialize, Validate and Plan') {
-            when {
-                expression {
-                    params.ACTION == 'plan' ||
-                    params.ACTION == 'apply' ||
-                    params.ACTION == 'destroy'
-                }
-            }
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "${AWS_CREDENTIALS_ID}"
-                ]]) {
-                    sh '''
-                        set -eu
-
-                        echo "Checking Terraform state object..."
-
-                        aws s3api head-object \
-                            --bucket "$TF_STATE_BUCKET" \
-                            --key "$TF_STATE_KEY" \
-                            >/dev/null || {
-                                echo "ERROR: Terraform state is missing or inaccessible."
-                                echo "Recover or reconstruct the correct state before proceeding."
-                                exit 1
-                            }
-
-                        echo "Initializing Terraform..."
-
-                        attempt=1
-                        until terraform init -input=false -reconfigure; do
-                            if [ "$attempt" -ge 3 ]; then
-                                echo "ERROR: Terraform initialization failed."
-                                exit 1
-                            fi
-
-                            attempt=$((attempt + 1))
-                            echo "Retrying Terraform init ($attempt/3)..."
-                            sleep 5
-                        done
-
+                        terraform init -input=false
                         terraform fmt -check -recursive
                         terraform validate
-
-                        if [ "$ACTION" = "destroy" ]; then
-                            terraform plan \
-                                -destroy \
-                                -input=false \
-                                -var-file="$TF_VAR_FILE" \
-                                -out=destroy.tfplan
-
-                            terraform show -no-color destroy.tfplan
-                        else
-                            terraform plan \
-                                -input=false \
-                                -var-file="$TF_VAR_FILE" \
-                                -out=tfplan
-
-                            terraform show -no-color tfplan
-                        fi
                     '''
                 }
             }
         }
 
-        stage('Approve and Execute') {
+        stage('Terraform Plan') {
             when {
                 expression {
-                    params.ACTION == 'apply' ||
-                    params.ACTION == 'destroy'
+                    params.ACTION == 'plan' || params.ACTION == 'apply'
                 }
             }
             steps {
-                script {
-                    def isDestroy = params.ACTION == 'destroy'
-
-                    input(
-                        message: isDestroy
-                            ? 'DESTROY infrastructure in account 129911414812, region ap-southeast-2?'
-                            : 'APPLY Terraform changes in account 129911414812, region ap-southeast-2?',
-                        ok: 'Approve'
-                    )
-                }
-
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
                     credentialsId: "${AWS_CREDENTIALS_ID}"
@@ -212,13 +138,137 @@ pipeline {
 
                         test "$ACCOUNT_ID" = "$EXPECTED_AWS_ACCOUNT_ID"
 
-                        if [ "$ACTION" = "destroy" ]; then
-                            test -f destroy.tfplan
-                            terraform apply -input=false destroy.tfplan
-                        else
-                            test -f tfplan
-                            terraform apply -input=false tfplan
+                        terraform plan \
+                            -input=false \
+                            -var-file="$TF_VAR_FILE" \
+                            -out=tfplan
+
+                        echo "========== Terraform Plan =========="
+                        terraform show -no-color tfplan
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Destroy Plan') {
+            when {
+                expression {
+                    params.ACTION == 'destroy'
+                }
+            }
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "${AWS_CREDENTIALS_ID}"
+                ]]) {
+                    sh '''
+                        set -eu
+
+                        ACCOUNT_ID=$(aws sts get-caller-identity \
+                            --query Account --output text)
+
+                        test "$ACCOUNT_ID" = "$EXPECTED_AWS_ACCOUNT_ID"
+
+                        terraform plan \
+                            -destroy \
+                            -input=false \
+                            -var-file="$TF_VAR_FILE" \
+                            -out=destroy.tfplan
+
+                        echo "========== Terraform Destroy Plan =========="
+                        terraform show -no-color destroy.tfplan
+                    '''
+                }
+            }
+        }
+
+        stage('Manual Approval') {
+            when {
+                expression {
+                    params.ACTION == 'apply' || params.ACTION == 'destroy'
+                }
+            }
+            steps {
+                script {
+                    def approvalMessage = params.ACTION == 'destroy'
+                        ? 'WARNING: Approve destruction of the Terraform-managed infrastructure only after reviewing destroy.tfplan.'
+                        : 'Approve creation or modification of infrastructure only after reviewing tfplan.'
+
+                    input(
+                        message: "${approvalMessage}\nAWS account: ${env.EXPECTED_AWS_ACCOUNT_ID}\nRegion: ${env.AWS_DEFAULT_REGION}",
+                        ok: 'Approve',
+                        submitterParameter: 'APPROVED_BY'
+                    )
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            when {
+                expression {
+                    params.ACTION == 'apply'
+                }
+            }
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "${AWS_CREDENTIALS_ID}"
+                ]]) {
+                    sh '''
+                        set -eu
+
+                        ACCOUNT_ID=$(aws sts get-caller-identity \
+                            --query Account --output text)
+
+                        if [ "$ACCOUNT_ID" != "$EXPECTED_AWS_ACCOUNT_ID" ]; then
+                            echo "ERROR: Account mismatch. Apply blocked."
+                            exit 1
                         fi
+
+                        test -f tfplan || {
+                            echo "ERROR: Saved Terraform plan not found."
+                            exit 1
+                        }
+
+                        terraform apply \
+                            -input=false \
+                            tfplan
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Destroy') {
+            when {
+                expression {
+                    params.ACTION == 'destroy'
+                }
+            }
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "${AWS_CREDENTIALS_ID}"
+                ]]) {
+                    sh '''
+                        set -eu
+
+                        ACCOUNT_ID=$(aws sts get-caller-identity \
+                            --query Account --output text)
+
+                        if [ "$ACCOUNT_ID" != "$EXPECTED_AWS_ACCOUNT_ID" ]; then
+                            echo "ERROR: Account mismatch. Destroy blocked."
+                            exit 1
+                        fi
+
+                        test -f destroy.tfplan || {
+                            echo "ERROR: Saved destroy plan not found."
+                            exit 1
+                        }
+
+                        # Apply the reviewed destroy plan.
+                        terraform apply \
+                            -input=false \
+                            destroy.tfplan
                     '''
                 }
             }
@@ -227,20 +277,28 @@ pipeline {
 
     post {
         success {
-            echo "Completed ACTION=${params.ACTION}."
+            echo "Terraform pipeline completed successfully. ACTION=${params.ACTION}"
         }
 
         failure {
-            echo 'Pipeline failed. Review the Console Output.'
+            echo 'Terraform pipeline failed. Review the Jenkins console output.'
+        }
+
+        aborted {
+            echo 'Terraform pipeline was aborted.'
         }
 
         always {
+            // Archive plans before removing the workspace.
             archiveArtifacts(
-                artifacts: 'tfplan,destroy.tfplan',
-                allowEmptyArchive: true
+                artifacts: 'tfplan,destroy.tfplan,bootstrap/bootstrap.tfplan',
+                allowEmptyArchive: true,
+                fingerprint: true
             )
 
+            echo 'Cleaning Jenkins workspace...'
             deleteDir()
+            echo 'Workspace cleanup completed.'
         }
     }
 }
