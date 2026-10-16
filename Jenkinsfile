@@ -1,18 +1,19 @@
+
 pipeline {
     agent any
 
     options {
         timestamps()
         disableConcurrentBuilds()
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 60, unit: 'MINUTES')
         skipDefaultCheckout(true)
     }
 
     parameters {
         choice(
             name: 'ACTION',
-            choices: ['destroy-buckets'],
-            description: 'Permanently delete both Terraform state buckets'
+            choices: ['bootstrap', 'plan', 'apply', 'destroy'],
+            description: 'Select the Terraform pipeline action'
         )
     }
 
@@ -21,15 +22,25 @@ pipeline {
         AWS_REGION = 'ap-southeast-2'
         EXPECTED_AWS_ACCOUNT_ID = '129911414812'
         AWS_CREDENTIALS_ID = 'aws-jenkins-credentials'
+        TF_VAR_FILE = 'environments/dev/terraform.tfvars'
+        TF_STATE_BUCKET = 'employee-management-terraform-state'
     }
 
     stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
         stage('Verify Tools') {
             steps {
                 sh '''
                     set -eu
                     command -v aws
+                    command -v terraform
                     aws --version
+                    terraform version
                 '''
             }
         }
@@ -46,20 +57,21 @@ pipeline {
                         ACCOUNT_ID=$(aws sts get-caller-identity \
                             --query Account --output text)
 
-                        echo "Authenticated AWS account: ${ACCOUNT_ID}"
+                        echo "Authenticated AWS account: $ACCOUNT_ID"
 
                         if [ "$ACCOUNT_ID" != "$EXPECTED_AWS_ACCOUNT_ID" ]; then
-                            echo "ERROR: Unexpected AWS account. Aborting."
+                            echo "ERROR: Unexpected AWS account."
                             exit 1
                         fi
-
-                        echo "AWS account verification successful."
                     '''
                 }
             }
         }
 
-        stage('Review Target Buckets') {
+        stage('Bootstrap Terraform State Bucket') {
+            when {
+                expression { params.ACTION == 'bootstrap' }
+            }
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
@@ -68,48 +80,151 @@ pipeline {
                     sh '''
                         set -eu
 
-                        for BUCKET in \
-                            employee-management-terraform-state \
-                            employee-management-terraform-state-ap-southeast-2
-                        do
-                            echo "Checking bucket: ${BUCKET}"
+                        BUCKET="$TF_STATE_BUCKET"
+                        REGION="$AWS_DEFAULT_REGION"
 
-                            if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
-                                aws s3api get-bucket-location --bucket "$BUCKET"
-                            else
-                                echo "Bucket not found or access denied: ${BUCKET}"
-                            fi
-                        done
+                        echo "Bootstrapping Terraform state bucket: $BUCKET"
+
+                        if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+                            echo "Bucket already exists and is accessible."
+                        else
+                            echo "Creating bucket in $REGION..."
+
+                            aws s3api create-bucket \
+                                --bucket "$BUCKET" \
+                                --region "$REGION" \
+                                --create-bucket-configuration \
+                                LocationConstraint="$REGION"
+                        fi
+
+                        aws s3api put-public-access-block \
+                            --bucket "$BUCKET" \
+                            --public-access-block-configuration \
+                            'BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true'
+
+                        aws s3api put-bucket-ownership-controls \
+                            --bucket "$BUCKET" \
+                            --ownership-controls \
+                            'Rules=[{ObjectOwnership=BucketOwnerEnforced}]'
+
+                        aws s3api put-bucket-versioning \
+                            --bucket "$BUCKET" \
+                            --versioning-configuration Status=Enabled
+
+                        aws s3api put-bucket-encryption \
+                            --bucket "$BUCKET" \
+                            --server-side-encryption-configuration \
+                            '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"},"BucketKeyEnabled":true}]}'
+
+                        aws s3api head-bucket --bucket "$BUCKET"
+
+                        echo "Terraform state bucket is ready."
+                    '''
+                }
+            }
+        }
+
+        stage('Main Terraform Init and Validate') {
+            when {
+                expression { params.ACTION != 'bootstrap' }
+            }
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "${AWS_CREDENTIALS_ID}"
+                ]]) {
+                    sh '''
+                        set -eu
+
+                        test -f "$TF_VAR_FILE"
+                        test -f backend.tf
+
+                        echo "Checking Terraform state bucket..."
+
+                        aws s3api head-bucket \
+                            --bucket "$TF_STATE_BUCKET"
+
+                        terraform init -input=false -reconfigure
+                        terraform fmt -check -recursive
+                        terraform validate
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Plan') {
+            when {
+                expression {
+                    params.ACTION == 'plan' || params.ACTION == 'apply'
+                }
+            }
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "${AWS_CREDENTIALS_ID}"
+                ]]) {
+                    sh '''
+                        set -eu
+
+                        terraform plan \
+                            -input=false \
+                            -var-file="$TF_VAR_FILE" \
+                            -out=tfplan
+
+                        terraform show -no-color tfplan
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Destroy Plan') {
+            when {
+                expression { params.ACTION == 'destroy' }
+            }
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "${AWS_CREDENTIALS_ID}"
+                ]]) {
+                    sh '''
+                        set -eu
+
+                        terraform plan \
+                            -destroy \
+                            -input=false \
+                            -var-file="$TF_VAR_FILE" \
+                            -out=destroy.tfplan
+
+                        terraform show -no-color destroy.tfplan
                     '''
                 }
             }
         }
 
         stage('Manual Approval') {
+            when {
+                expression {
+                    params.ACTION == 'apply' || params.ACTION == 'destroy'
+                }
+            }
             steps {
                 script {
+                    def approvalText = params.ACTION == 'destroy'
+                        ? 'DESTROY infrastructure in AWS account 129911414812, region ap-southeast-2?'
+                        : 'APPLY infrastructure changes to AWS account 129911414812, region ap-southeast-2?'
+
                     input(
-                        message: '''
-PERMANENT DELETION WARNING
-
-This pipeline will permanently delete these buckets
-and all object versions and delete markers:
-
-1. employee-management-terraform-state
-2. employee-management-terraform-state-ap-southeast-2
-
-This can destroy Terraform state and prevent the existing
-Terraform backend from initializing.
-
-Confirm that you have backed up any state you need.
-''',
-                        ok: 'DELETE BOTH BUCKETS'
+                        message: approvalText,
+                        ok: 'Approve'
                     )
                 }
             }
         }
 
-        stage('Delete Both Buckets') {
+        stage('Terraform Apply') {
+            when {
+                expression { params.ACTION == 'apply' }
+            }
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
@@ -118,76 +233,22 @@ Confirm that you have backed up any state you need.
                     sh '''
                         set -eu
 
-                        # Delete every object version / delete marker of one type
-                        # (Versions or DeleteMarkers), 1000 at a time.
-                        purge() {
-                            BUCKET="$1"
-                            TYPE="$2"
-                            LOOPS=0
+                        ACCOUNT_ID=$(aws sts get-caller-identity \
+                            --query Account --output text)
 
-                            while true; do
-                                FIRST=$(aws s3api list-object-versions \
-                                    --bucket "$BUCKET" --max-items 1 \
-                                    --query "${TYPE}[0].Key" --output text)
+                        test "$ACCOUNT_ID" = "$EXPECTED_AWS_ACCOUNT_ID"
+                        test -f tfplan
 
-                                if [ -z "$FIRST" ] || [ "$FIRST" = "None" ]; then
-                                    break
-                                fi
-
-                                LOOPS=$((LOOPS + 1))
-                                if [ "$LOOPS" -gt 500 ]; then
-                                    echo "ERROR: too many delete loops for ${BUCKET}. Aborting."
-                                    exit 1
-                                fi
-
-                                PAYLOAD=$(aws s3api list-object-versions \
-                                    --bucket "$BUCKET" --max-items 1000 \
-                                    --query "{Objects: ${TYPE}[].{Key:Key,VersionId:VersionId}}" \
-                                    --output json)
-
-                                aws s3api delete-objects \
-                                    --bucket "$BUCKET" \
-                                    --delete "$PAYLOAD" > /dev/null
-
-                                echo "Deleted a batch of ${TYPE} from ${BUCKET}"
-                            done
-                        }
-
-                        for BUCKET in \
-                            employee-management-terraform-state \
-                            employee-management-terraform-state-ap-southeast-2
-                        do
-                            echo ""
-                            echo "Processing bucket: ${BUCKET}"
-
-                            if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
-                                echo "Bucket unavailable or not found: ${BUCKET}. Aborting to avoid deleting the wrong resource."
-                                exit 1
-                            fi
-
-                            LOCATION=$(aws s3api get-bucket-location \
-                                --bucket "$BUCKET" \
-                                --query LocationConstraint --output text)
-
-                            if [ "$LOCATION" != "ap-southeast-2" ]; then
-                                echo "Unexpected region for ${BUCKET}: ${LOCATION}. Aborting."
-                                exit 1
-                            fi
-
-                            purge "$BUCKET" Versions
-                            purge "$BUCKET" DeleteMarkers
-
-                            aws s3api delete-bucket --bucket "$BUCKET"
-                            echo "Successfully deleted bucket: ${BUCKET}"
-                        done
-
-                        echo "Both requested buckets have been deleted."
+                        terraform apply -input=false tfplan
                     '''
                 }
             }
         }
 
-        stage('Verify Deletion') {
+        stage('Terraform Destroy') {
+            when {
+                expression { params.ACTION == 'destroy' }
+            }
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
@@ -196,17 +257,13 @@ Confirm that you have backed up any state you need.
                     sh '''
                         set -eu
 
-                        for BUCKET in \
-                            employee-management-terraform-state \
-                            employee-management-terraform-state-ap-southeast-2
-                        do
-                            if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
-                                echo "ERROR: Bucket still exists: $BUCKET"
-                                exit 1
-                            else
-                                echo "Bucket is absent or inaccessible: $BUCKET"
-                            fi
-                        done
+                        ACCOUNT_ID=$(aws sts get-caller-identity \
+                            --query Account --output text)
+
+                        test "$ACCOUNT_ID" = "$EXPECTED_AWS_ACCOUNT_ID"
+                        test -f destroy.tfplan
+
+                        terraform apply -input=false destroy.tfplan
                     '''
                 }
             }
@@ -215,12 +272,19 @@ Confirm that you have backed up any state you need.
 
     post {
         success {
-            echo 'Bucket deletion pipeline completed successfully.'
+            echo "Pipeline completed successfully for ACTION=${params.ACTION}."
         }
+
         failure {
-            echo 'Pipeline failed. Review Console Output before retrying.'
+            echo 'Pipeline failed. Review the Console Output.'
         }
+
         always {
+            archiveArtifacts(
+                artifacts: 'tfplan,destroy.tfplan',
+                allowEmptyArchive: true
+            )
+
             echo 'Cleaning Jenkins workspace...'
             deleteDir()
             echo 'Workspace cleanup completed.'
