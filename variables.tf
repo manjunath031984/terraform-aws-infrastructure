@@ -66,13 +66,13 @@ variable "single_nat_gateway" {
 variable "postgres_instance_types" {
   description = "EC2 instance types for the PostgreSQL node group"
   type        = list(string)
-  default     = ["t3.small"]
+  default     = ["m7i-flex.large"]
 }
 
 variable "employee_instance_types" {
   description = "EC2 instance types for the Employee Management node group"
   type        = list(string)
-  default     = ["t3.small"]
+  default     = ["c7i-flex.large"]
 }
 
 variable "node_disk_size" {

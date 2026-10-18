@@ -23,13 +23,13 @@ variable "private_subnet_ids" {
 variable "postgres_instance_types" {
   description = "EC2 instance types for the PostgreSQL node"
   type        = list(string)
-  default     = ["t3.medium"]
+  default     = ["m7i-flex.large"]
 }
 
 variable "employee_instance_types" {
   description = "EC2 instance types for the Employee Management node"
   type        = list(string)
-  default     = ["t3.medium"]
+  default     = ["c7i-flex.large"]
 }
 
 variable "disk_size" {
